@@ -89,6 +89,8 @@ jobs:
           # Each staging app must be running exactly the pinned digest, on one started machine (the runner reads one
           # clock per server), before and after the run: otherwise the result belongs to some other image.
           token_of() { local v; v="FLY_TOKEN_$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; printf '%s' "${!v:-}"; }
+          # The Fly tokens stay shell variables, not environment: only flyctl is handed one, never the suite.
+          export -n FLY_TOKEN_HEYGENT_STAGING FLY_TOKEN_PARLEY_PEER_STAGING
           running() {
             for app in "$A_APP" "$B_APP"; do
               machines="$(FLY_API_TOKEN="$(token_of "$app")" flyctl machine list --app "$app" --json)"
@@ -110,7 +112,7 @@ jobs:
 
           out="$RUNNER_TEMP/conformance.txt"
           set +e
-          env -u FLY_TOKEN_HEYGENT_STAGING -u FLY_TOKEN_PARLEY_PEER_STAGING node --experimental-strip-types --disable-warning=ExperimentalWarning packages/conformance/src/cli.ts \
+          node --experimental-strip-types --disable-warning=ExperimentalWarning packages/conformance/src/cli.ts \
             --a "https://$A_APP.fly.dev" --a-key CONFORMANCE_HEYGENT_STAGING_KEY \
             --b "https://$B_APP.fly.dev" --b-key CONFORMANCE_PEER_STAGING_KEY \
             ${prod[@]+"${prod[@]}"} | tee "$out"
@@ -121,9 +123,9 @@ jobs:
           # list, at the pinned commit) must have printed PASS or SKIP. A skip is accepted only for a case that needs the
           # third origin (no --third yet; runbooks/deploy.md), whatever its reason, or for production-hides-test-interface
           # while no production server is deployed. Anything else fails the run.
-          lists="$(env -u FLY_TOKEN_HEYGENT_STAGING -u FLY_TOKEN_PARLEY_PEER_STAGING -u CONFORMANCE_HEYGENT_STAGING_KEY -u CONFORMANCE_PEER_STAGING_KEY \
+          lists="$(env -u CONFORMANCE_HEYGENT_STAGING_KEY -u CONFORMANCE_PEER_STAGING_KEY \
             node --experimental-strip-types --disable-warning=ExperimentalWarning --input-type=module \
-            -e "const m = await import('./packages/conformance/src/runner.ts'); console.log(m.CASE_NAMES.length); console.log(m.THIRD_ORIGIN_CASES.join(' '))")"
+            -e "const m = await import('./packages/conformance/src/runner.ts'); console.log(m.CASE_NAMES.join(' ')); console.log(m.THIRD_ORIGIN_CASES.join(' '))")"
           cases="$(echo "$lists" | sed -n 1p)"
           allowed="$(echo "$lists" | sed -n 2p)"
           if [ "$nprod" -eq 0 ]; then allowed="$allowed production-hides-test-interface"; fi
@@ -139,8 +141,12 @@ jobs:
               ;;
             *) echo "conformance exited $code" >&2; exit 1 ;;
           esac
-          [[ "$cases" =~ ^[0-9]+$ ]] && [ $((passed + skipped)) -eq "$cases" ] ||
-            { echo "$passed passed + $skipped skipped is not the suite's $cases cases" >&2; exit 1; }
+          # The PASS and SKIP lines name each of the suite's cases exactly once, and nothing else.
+          [ -n "$cases" ] || { echo "could not read the suite's case list" >&2; exit 1; }
+          if ! diff <(printf '%s\n' $cases | sort) <(sed -nE 's/^(PASS|SKIP) ([^ ]+).*/\2/p' "$out" | sort) >&2; then
+            echo "the PASS and SKIP lines do not name each of the suite's cases exactly once" >&2
+            exit 1
+          fi
 
           running
 

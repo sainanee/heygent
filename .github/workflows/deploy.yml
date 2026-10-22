@@ -85,6 +85,8 @@ jobs:
           staging=false
           app_of() { sed -nE 's/^app[[:space:]]*=[[:space:]]*"([a-z0-9-]+)".*/\1/p' "servers/$1/fly.toml"; }
           token_of() { local v; v="FLY_TOKEN_$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; printf '%s' "${!v:-}"; }
+          # The tokens stay shell variables, not environment: only flyctl, for its own app, is handed one.
+          export -n FLY_TOKEN_HEYGENT FLY_TOKEN_HEYGENT_STAGING FLY_TOKEN_PARLEY_PEER FLY_TOKEN_PARLEY_PEER_STAGING
           first="" later=""
           for f in $FOLDERS; do
             if [ ! -d "servers/$f" ]; then echo "servers/$f was removed; nothing to deploy"
@@ -107,14 +109,13 @@ jobs:
               case "$line" in '' | '#'*) continue ;; esac
               envs+=(--env "$line")
             done < "$dir/server.env"
-            FLY_API_TOKEN="$(token_of "$app")"
-            [ -n "$FLY_API_TOKEN" ] || { echo "no FLY_TOKEN for $app in the fly environment" >&2; exit 1; }
-            export FLY_API_TOKEN
+            token="$(token_of "$app")"
+            [ -n "$token" ] || { echo "no FLY_TOKEN for $app in the fly environment" >&2; exit 1; }
             echo "::group::deploy $app ($mode): $image"
             # From the folder itself, so fly.toml's [[files]] local_path resolves the same whichever base flyctl uses.
-            (cd "$dir" && flyctl config validate --strict --config fly.toml)
-            (cd "$dir" && flyctl deploy --app "$app" --config fly.toml --image "$image" --ha=false "${envs[@]}")
-            unset FLY_API_TOKEN
+            (cd "$dir" && FLY_API_TOKEN="$token" flyctl config validate --strict --config fly.toml)
+            (cd "$dir" && FLY_API_TOKEN="$token" flyctl deploy --app "$app" --config fly.toml --image "$image" --ha=false "${envs[@]}")
+            token=''
             echo "::endgroup::"
             scripts/post-deploy-check.sh "https://$app.fly.dev" "$mode"
             echo "- \`$app\` ($mode): \`$image\`" >> "$GITHUB_STEP_SUMMARY"

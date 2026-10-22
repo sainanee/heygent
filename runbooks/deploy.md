@@ -23,7 +23,11 @@ for app in heygent heygent-staging parley-peer parley-peer-staging; do fly apps 
 
 **2. Four Supabase projects**, in the Supabase dashboard: one per app, named after the app (table above), region Singapore (`ap-southeast-1`). Choose Postgres 17 if it is offered: Parley's tests run on 17.6 and its operator guide asks for 17 (the migrations use nothing newer than Postgres 13 that we found, but only 17 is tested). Never share a project between two apps: the database is the server (accounts, passkeys, threads, its signing keys). Save each project's database password in your password manager; it goes nowhere else.
 
-The server creates its own tables in the project's `postgres` database at every start, as the `postgres` user; no extensions are needed.
+The server creates its own tables in the project's `postgres` database, schema `public`, at every start, as the `postgres` user; no extensions are needed.
+
+**2a. Turn each project's Data API off, before the app's first deploy.** By default Supabase grants new tables in `public` to its `anon` and `authenticated` roles and serves them at `https://<ref>.supabase.co/rest/v1/` (PostgREST) and `/graphql/v1` (pg_graphql, through the same Data API). The anon key is public by design, so with the Data API on, anyone could read and write Parley's tables: accounts, passkeys, sessions, threads and the server's private signing keys. Parley does not use the Data API. In each project: Project Settings → Data API, turn the Data API off; if the dashboard offers only the list of exposed schemas, remove `public` from it. (That dashboard path is unverified; if the new-project form offers to leave the Data API off, take that too.)
+
+**2b. Revoke the API roles' privileges, once per project** (defence in depth behind 2a: if the Data API is ever turned back on, the API roles still reach nothing). In the project's SQL editor (it runs as `postgres`; unverified), paste and run `sql/revoke-data-api-roles.sql`. It takes every privilege on schema `public`, its tables, sequences and functions from `anon` and `authenticated`, and changes `postgres`'s default privileges so the tables the server creates later are not granted to them. Nothing is taken from `postgres`, which the server uses and which owns what it creates. (Checked on PGlite set up with Supabase's default grants: afterwards `anon` and `authenticated` have no privilege on old or new tables, `postgres` reads, writes and fires triggers, and a second run is harmless. Not yet run on Supabase.)
 
 **3. Supabase's root CA, into `certs/supabase-ca.crt`.** In any one project: Project Settings → Database → SSL Configuration → Download certificate. Replace the whole placeholder file `certs/supabase-ca.crt` with it, and check that the other three projects offer the same file (`shasum -a 256` each download; if they differ, stop and ask). Commit it in a pull request. It is public, not a secret. `deploy.yml` refuses to deploy while the file is not a PEM certificate. Each `fly.toml` mounts it into the machine at `/etc/parley/supabase-ca.crt` (`[[files]]`). Unverified until Task 7: that the mount works from `deploy.yml`'s invocation, and that the server's user (`node`) can read the file. Optionally turn on "Enforce SSL on incoming connections" on the same settings page.
 
@@ -70,6 +74,23 @@ With the `fly` environment this means nothing reaches Fly except what was merged
 5. **Production.** In a pull request, write the same line into `servers/heygent/image` and `servers/peer/image`. `check-pins.ts` refuses a production pin whose digest is not in `passed-on-staging.txt`, in `check.yml` and again in `deploy.yml` before anything deploys. Merge it: `deploy.yml` deploys and checks both. The first production deploy needs the owner's go-ahead at that time.
 
 A folder with no `image` file has not been deployed yet: the checks accept it, and `deploy.yml` skips it.
+
+**After each app's first deploy, before anyone signs up**, check that its Supabase project serves none of Parley's tables (the tables exist only after the first deploy, so before it the check proves nothing):
+
+```sh
+scripts/check-data-api.sh <project-ref>
+```
+
+It asks for the project's anon key (Project Settings → API keys) with hidden input, then asks REST (`GET /rest/v1/server_keys`) and GraphQL (`serverKeysCollection`) for the server's keys. A REST `200`, or GraphQL data for `serverKeysCollection`, means exposed: exit 1, and follow `incident.md`, "The Data API served Parley's tables". Any other answer is a refusal. Which code Supabase gives for each kind of refusal is unverified (likely `404` with the Data API off, `406` with `public` not exposed, `401`/`403` without privileges): record what you see. Also run, in the SQL editor:
+
+```sql
+SELECT grantee, table_name, privilege_type FROM information_schema.role_table_grants
+WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated');
+```
+
+It must return no rows.
+
+**Delisting a digest** (a build found bad after it passed): a pull request from a `delist/<anything>` branch of this repo whose change to `passed-on-staging.txt` only deletes lines. `check.yml` allows exactly that, and nothing but a `conformance/*` branch may add a line. If a production folder is pinned to the delisted digest, re-pin it in the same pull request (`rollback.md`); `check-pins.ts` refuses a production pin whose digest is no longer listed.
 
 Settings: edit `server.env` or `fly.toml` in a pull request; merging deploys that folder. Secrets: `secrets.md`, then redeploy.
 

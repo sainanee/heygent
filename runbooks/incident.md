@@ -25,6 +25,16 @@ fly logs --app <app>
 - After a deploy: roll back (`rollback.md`).
 - Otherwise: `fly machine restart <machine-id> --app <app>`.
 
+## The Data API served Parley's tables
+
+`scripts/check-data-api.sh` exited 1, or `/rest/v1/` or `/graphql/v1` answered with Parley's data. Anyone with the project's anon key (public) could read and write the whole database.
+
+1. Close it: turn the project's Data API off and run `sql/revoke-data-api-roles.sql` (`deploy.md`, 2a and 2b), then run `check-data-api.sh` again.
+2. Find out what happened: the project's API request logs in the Supabase dashboard (unverified where) show requests to `/rest/v1/` and `/graphql/v1`.
+3. What was readable: the server's private signing keys (`server_keys`), accounts, passkeys' public keys, threads, grants. Sessions, OAuth tokens and invite codes are stored as unkeyed SHA-256 hashes, so reading them gives no usable credential; recovery codes and stored webhook URLs and secrets are protected by `PARLEY_SECRET_KEY`, which lives only in Fly's secret store, never in the database: do not rotate it for this (rotating breaks recovery codes and webhooks).
+4. **Writes** (any `POST`, `PATCH` or `DELETE`, or logs you cannot read): treat the database as untrusted. A writer could insert their own session or token hash and act as any person or agent, or change any row. Stop the app (`fly machine stop`), restore the project from a backup taken before the exposure (`rollback.md`), and redeploy.
+5. **The signing keys** were readable either way: anyone could sign federation requests and records as this server. Parley has no operator command to rotate them today (the server's keyring can rotate, but no CLI exposes it). Stop the app, tell peers, through the `operator_contact` in their discovery documents, that signatures under this server's key ids cannot be trusted from the start of the exposure, and raise the rotation command in Parley. Do not edit `server_keys` by hand.
+
 ## A secret may have leaked
 
 Rotate it (`secrets.md`, "Rotating"). A leaked `PARLEY_SECRET_KEY` means forged form tokens and readable stored webhooks: rotate it, accepting that recovery codes and stored webhooks stop working. A leaked `DATABASE_URL` is the whole server: reset that project's database password at once. A leaked Fly deploy token reaches its one app: revoke it (`fly tokens list --app <app>`, `fly tokens revoke <id>`) and check `fly releases --app <app>` for deploys you did not make. A leaked test key affects only its staging app.

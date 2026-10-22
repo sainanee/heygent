@@ -21,7 +21,7 @@ die() { echo "set-secrets: $*" >&2; exit 1; }
 [ $# -ge 1 ] || die "usage: $0 <app> [DATABASE_URL|PARLEY_SECRET_KEY|PARLEY_TEST_KEYS ...]"
 app="$1"
 shift
-printf '%s' "$app" | grep -Eqx '[a-z0-9][a-z0-9-]*' || die "an app name is lowercase letters, digits and hyphens"
+[[ "$app" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "an app name is lowercase letters, digits and hyphens"
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 folder=''

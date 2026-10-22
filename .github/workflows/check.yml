@@ -55,9 +55,12 @@ jobs:
               -e "const m = await import('./apps/server/src/config.ts'); m.loadConfig(process.env); console.log('config ok');"
           done
 
-      - name: passed-on-staging.txt changes only by the conformance workflow's pull request
-        # Such a pull request comes from a conformance/* branch of this repository, changes nothing else, and appends
-        # exactly one new digest. (Speed bump, not the lock: the lock is the main ruleset and the owner's review.)
+      - name: passed-on-staging.txt changes only by appending one digest (conformance) or deleting lines (delist)
+        # Appends come from the conformance workflow's pull request: a conformance/* branch of this repository that
+        # changes nothing else and appends exactly one new digest. Delisting is the owner's: a delist/* branch of this
+        # repository whose change to the file only deletes lines (it may re-pin servers too; check-pins then refuses a
+        # production pin left on a delisted digest). Anything else is refused. (A speed bump, not the lock: the lock is
+        # the main ruleset and the owner's review.)
         if: github.event_name == 'pull_request'
         env:
           HEAD_REF: ${{ github.head_ref }}
@@ -68,14 +71,25 @@ jobs:
           # The checkout is the pull request merged into its base; HEAD^1 is that base.
           if git diff --quiet HEAD^1 HEAD -- passed-on-staging.txt; then echo "passed-on-staging.txt unchanged"; exit 0; fi
           fail() { echo "passed-on-staging.txt: $*" >&2; exit 1; }
-          [ "$HEAD_REPO" = "$REPO" ] && [[ "$HEAD_REF" == conformance/* ]] || fail "changed only from a conformance/* branch of $REPO"
-          [ "$(git diff --name-only HEAD^1 HEAD)" = passed-on-staging.txt ] || fail "its pull request changes nothing else"
+          [ "$HEAD_REPO" = "$REPO" ] || fail "changed only from a branch of $REPO"
           base="$(git show HEAD^1:passed-on-staging.txt)"
-          line="$(tail -n 1 passed-on-staging.txt)"
-          [[ "$line" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "the appended line is not a digest"
-          [ "$(cat passed-on-staging.txt)" = "$base"$'\n'"$line" ] || fail "exactly one line may be appended, nothing else changed"
-          ! grep -qxF "$line" <(printf '%s\n' "$base") || fail "$line is already listed"
-          echo "appends $line"
+          case "$HEAD_REF" in
+            conformance/*)
+              [ "$(git diff --name-only HEAD^1 HEAD)" = passed-on-staging.txt ] || fail "a conformance pull request changes nothing else"
+              line="$(tail -n 1 passed-on-staging.txt)"
+              [[ "$line" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "the appended line is not a digest"
+              [ "$(cat passed-on-staging.txt)" = "$base"$'\n'"$line" ] || fail "exactly one line may be appended, nothing else changed"
+              ! grep -qxF "$line" <(printf '%s\n' "$base") || fail "$line is already listed"
+              echo "appends $line"
+              ;;
+            delist/*)
+              added="$(git diff -U0 HEAD^1 HEAD -- passed-on-staging.txt | grep -c '^+[^+]' || true)"
+              removed="$(git diff -U0 HEAD^1 HEAD -- passed-on-staging.txt | grep -c '^-[^-]' || true)"
+              [ "$added" -eq 0 ] && [ "$removed" -ge 1 ] || fail "a delist pull request only deletes lines"
+              git diff -U0 HEAD^1 HEAD -- passed-on-staging.txt | sed -n 's/^-\([^-]\)/delists \1/p'
+              ;;
+            *) fail "changed only from a conformance/* (append) or delist/* (delete) branch" ;;
+          esac
 
       - name: shellcheck
         run: |

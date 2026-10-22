@@ -62,3 +62,12 @@ test('set-secrets refuses a DATABASE_URL on the transaction pooler or without ve
     assert.equal(s.flyCalled(), false);
   }
 });
+
+test('set-secrets refuses an app name that is not one line of lowercase letters, digits and hyphens', async () => {
+  const s = setup();
+  // A second line must not let the name pass as "heygent" while flyctl is handed something else.
+  const r = await s.run(['heygent\nheygent-staging'], `${DB}\n${SECRET_KEY}\n`);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /an app name is lowercase letters, digits and hyphens/);
+  assert.equal(s.flyCalled(), false);
+});

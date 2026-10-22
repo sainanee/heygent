@@ -43,6 +43,8 @@ No secret lives here. Database URLs, app keys and test keys are in Fly's secret 
 | `scripts/check-pins.ts` | the pin rules |
 | `scripts/check-env.ts` | each `server.env` against what the server accepts and this network's values |
 | `scripts/set-secrets.sh` | stages an app's secrets in Fly from hidden prompts |
+| `scripts/check-data-api.sh` | checks a Supabase project serves none of Parley's tables through its Data API |
+| `sql/revoke-data-api-roles.sql` | run once per Supabase project: Supabase's API roles get nothing in schema `public` |
 | `scripts/post-deploy-check.sh` | checks a deployed server from outside (discovery, mode, test interface, health) |
 | `.github/workflows/` | `check` (pull requests), `deploy` (main), `conformance` (after a staging deploy) |
 | `runbooks/` | deploy, rollback, secrets, invites, incident |

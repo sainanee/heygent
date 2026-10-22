@@ -40,6 +40,12 @@ test('post-deploy check passes a production server that hides its test interface
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
+test('post-deploy check passes a staging server in test mode, test interface and all', async () => {
+  const r = await check({ mode: 'test', testInterface: true, testAccounts: 401 }, 'test');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /post-deploy check passed .*\(test\)/);
+});
+
 test('post-deploy check fails a server whose mode is not the expected one', async () => {
   const r = await check({ mode: 'test', testInterface: false, testAccounts: 404 }, 'production');
   assert.equal(r.status, 1, r.stdout + r.stderr);
