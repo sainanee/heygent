@@ -65,6 +65,8 @@ jobs:
           repository: sainanee/parley
           ref: ${{ steps.pin.outputs.revision }}
           path: parley
+          # sainanee/parley is private: a read-only deploy key on that repo alone (runbooks/secrets.md).
+          ssh-key: ${{ secrets.PARLEY_DEPLOY_KEY }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
