@@ -1,0 +1,175 @@
+name: conformance
+
+# After a staging deploy (called from deploy.yml), or by hand: runs Parley's conformance suite, from the commit the
+# pinned image was built from, across the real network against the staging pair, plus the production-hides-test-
+# interface check against each deployed production server. On a pass it opens a pull request appending the digest to
+# passed-on-staging.txt. Merging that pull request stays the owner's go-ahead.
+#
+# What a run does to staging: fresh accounts each time, and both servers' clocks move about 8 days forward and stay
+# there (runbooks/deploy.md).
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  A_APP: heygent-staging
+  A_DIR: servers/heygent-staging
+  B_APP: parley-peer-staging
+  B_DIR: servers/peer-staging
+  PROD_DIRS: servers/heygent servers/peer
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      digest: ${{ steps.pin.outputs.digest }}
+      revision: ${{ steps.pin.outputs.revision }}
+      summary: ${{ steps.suite.outputs.summary }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: the staging pair's pin, and the Parley commit it was built from
+        id: pin
+        run: |
+          set -euo pipefail
+          pin='^ghcr\.io/sainanee/parley-server@sha256:[0-9a-f]{64}$'
+          a="$(cat "$A_DIR/image" 2>/dev/null || true)"
+          b="$(cat "$B_DIR/image" 2>/dev/null || true)"
+          [[ "$a" =~ $pin ]] || { echo "$A_DIR/image is not a digest pin" >&2; exit 1; }
+          [ "$a" = "$b" ] || { echo "the staging pair runs two images ($A_DIR, $B_DIR): pin both to one digest" >&2; exit 1; }
+          docker pull --quiet "$a"
+          revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$a")"
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || { echo "the image has no org.opencontainers.image.revision label" >&2; exit 1; }
+          echo "image=$a" >> "$GITHUB_OUTPUT"
+          echo "digest=${a#*@}" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "image $a, built from sainanee/parley@$revision"
+
+      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+        with:
+          version: 0.4.51
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sainanee/parley
+          ref: ${{ steps.pin.outputs.revision }}
+          path: parley
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: install the conformance suite
+        working-directory: parley
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --filter '@parley/conformance...'
+
+      - name: run the suite against the staging pair
+        id: suite
+        working-directory: parley
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CONFORMANCE_HEYGENT_STAGING_KEY: ${{ secrets.CONFORMANCE_HEYGENT_STAGING_KEY }}
+          CONFORMANCE_PEER_STAGING_KEY: ${{ secrets.CONFORMANCE_PEER_STAGING_KEY }}
+          DIGEST: ${{ steps.pin.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Each staging app must be running exactly the pinned digest, on one started machine (the runner reads one
+          # clock per server), before and after the run: otherwise the result belongs to some other image.
+          running() {
+            for app in "$A_APP" "$B_APP"; do
+              machines="$(flyctl machine list --app "$app" --json)"
+              echo "$machines" | jq -r --arg app "$app" '.[] | "\($app): machine \(.id) \(.state) \(.image_ref.digest)"'
+              echo "$machines" | jq -e --arg d "$DIGEST" 'length == 1 and .[0].state == "started" and .[0].image_ref.digest == $d' >/dev/null ||
+                { echo "$app is not running exactly one started machine on $DIGEST" >&2; return 1; }
+            done
+          }
+          running
+
+          # Production servers that are deployed (have an image); paths are relative to the heygent checkout above.
+          prod=() nprod=0
+          for dir in $PROD_DIRS; do
+            [ -f "../$dir/image" ] || continue
+            app="$(sed -nE 's/^app[[:space:]]*=[[:space:]]*"([a-z0-9-]+)".*/\1/p' "../$dir/fly.toml")"
+            prod+=(--prod "https://$app.fly.dev")
+            nprod=$((nprod + 1))
+          done
+
+          out="$RUNNER_TEMP/conformance.txt"
+          set +e
+          env -u FLY_API_TOKEN node --experimental-strip-types --disable-warning=ExperimentalWarning packages/conformance/src/cli.ts \
+            --a "https://$A_APP.fly.dev" --a-key CONFORMANCE_HEYGENT_STAGING_KEY \
+            --b "https://$B_APP.fly.dev" --b-key CONFORMANCE_PEER_STAGING_KEY \
+            ${prod[@]+"${prod[@]}"} | tee "$out"
+          code="${PIPESTATUS[0]}"
+          set -e
+
+          # Exit 0: every case passed. Exit 3: none failed, some skipped. A skip is accepted only for a case that needs
+          # the third origin (no --third yet; runbooks/deploy.md), or for production-hides-test-interface while no
+          # production server is deployed. Anything else fails the run.
+          allowed="$(env -u FLY_API_TOKEN -u CONFORMANCE_HEYGENT_STAGING_KEY -u CONFORMANCE_PEER_STAGING_KEY \
+            node --experimental-strip-types --disable-warning=ExperimentalWarning --input-type=module \
+            -e "const m = await import('./packages/conformance/src/runner.ts'); console.log(m.THIRD_ORIGIN_CASES.join(' '))")"
+          if [ "$nprod" -eq 0 ]; then allowed="$allowed production-hides-test-interface"; fi
+          case "$code" in
+            0) ;;
+            3)
+              for name in $(sed -n 's/^SKIP \([^ ]*\).*/\1/p' "$out"); do
+                case " $allowed " in *" $name "*) ;; *) echo "$name skipped, and only third-origin cases may skip" >&2; exit 1 ;; esac
+              done
+              ;;
+            *) echo "conformance exited $code" >&2; exit 1 ;;
+          esac
+
+          running
+
+          passed="$(grep -c '^PASS ' "$out" || true)"
+          skipped="$(grep -c '^SKIP ' "$out" || true)"
+          summary="$passed passed, $skipped skipped (allowed skips only), production servers checked: $nprod"
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+          { echo "### Conformance passed: \`$DIGEST\`"; echo; echo "$summary"; echo; echo '```'; cat "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  record:
+    needs: run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: open a pull request adding the digest to passed-on-staging.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ needs.run.outputs.digest }}
+          REVISION: ${{ needs.run.outputs.revision }}
+          SUMMARY: ${{ needs.run.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bad digest" >&2; exit 1; }
+          if grep -qxF "$DIGEST" passed-on-staging.txt; then echo "$DIGEST is already listed"; exit 0; fi
+          if [ -n "$(gh pr list --state open --search "$DIGEST in:title" --json number --jq '.[].number')" ]; then
+            echo "a pull request for $DIGEST is already open"; exit 0
+          fi
+          branch="conformance/${DIGEST:7:12}-${GITHUB_RUN_ID}"
+          git switch -c "$branch"
+          echo "$DIGEST" >> passed-on-staging.txt
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "conformance: $DIGEST passed on staging" -m "Built from sainanee/parley@$REVISION. $SUMMARY. Run: $RUN_URL" passed-on-staging.txt
+          git push -q origin "$branch"
+          gh pr create --base main --head "$branch" --title "conformance: $DIGEST passed on staging" --body "$(printf '%s\n' \
+            "Conformance passed on the staging pair (heygent-staging, parley-peer-staging) for:" "" \
+            "- image: \`ghcr.io/sainanee/parley-server@$DIGEST\`" \
+            "- built from: sainanee/parley@$REVISION" \
+            "- result: $SUMMARY" \
+            "- run: $RUN_URL" "" \
+            "Merging lists this digest in passed-on-staging.txt, so a production pin may name it. Merging is the owner's go-ahead.")"

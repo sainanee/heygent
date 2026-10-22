@@ -1,0 +1,30 @@
+# heygent.fly.dev: production.
+# The image comes from ./image (deploy.yml passes it as --image) and the settings from ./server.env (passed as --env);
+# secrets live only in Fly's store (runbooks/secrets.md). Deploy only through deploy.yml.
+app = "heygent"
+# All four apps share one Managed Postgres cluster: keep this the cluster's region (runbooks/deploy.md).
+primary_region = "lhr"
+
+[deploy]
+  # One machine, one copy of the server per database: never bluegreen or canary, which run two copies at once.
+  strategy = "rolling"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The server's background work (delivery, expiries) runs inside it, and federation peers must not find it cold:
+  # keep the one machine always on.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

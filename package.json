@@ -1,0 +1,12 @@
+{
+  "name": "heygent",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Config for the heygent reference network of Parley servers. No runtime dependencies.",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test \"scripts/*.test.ts\"",
+    "check": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-pins.ts . && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-env.ts ."
+  }
+}

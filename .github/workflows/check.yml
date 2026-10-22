@@ -1,0 +1,68 @@
+name: check
+
+# Every pull request: the pin rules, each server.env (by this repo's schema check and by the pinned image's own config
+# loader), the shell scripts, and each fly.toml against the Fly platform.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: script tests
+        run: npm test
+
+      - name: pins (digests only; production pins passed on staging)
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-pins.ts .
+
+      - name: server.env schema
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-env.ts .
+
+      - name: server.env against the pinned image's own config loader
+        # The server's loadConfig (apps/server/src/config.ts) at exactly the pinned build, with stand-ins for the secrets
+        # (never real ones). A folder with no image yet has nothing to check against.
+        run: |
+          set -euo pipefail
+          for dir in servers/*/; do
+            dir="${dir%/}"
+            if [ ! -f "$dir/image" ]; then echo "$dir: no image yet"; continue; fi
+            image="$(cat "$dir/image")"
+            standins=(-e DATABASE_URL=postgres://stand-in -e PARLEY_SECRET_KEY=stand-in-stand-in-stand-in-stand-in)
+            if grep -qx 'PARLEY_MODE=test' "$dir/server.env"; then
+              standins+=(-e "PARLEY_TEST_KEYS={\"stand-in\":\"$(printf 'A%.0s' $(seq 43))\"}")
+            fi
+            echo "$dir: $image"
+            docker run --rm --env-file "$dir/server.env" "${standins[@]}" "$image" \
+              node --experimental-strip-types --disable-warning=ExperimentalWarning --input-type=module \
+              -e "const m = await import('./apps/server/src/config.ts'); m.loadConfig(process.env); console.log('config ok');"
+          done
+
+      - name: shellcheck
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+          shellcheck scripts/*.sh
+
+      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+        with:
+          version: 0.4.51
+      - name: fly config validate
+        # Validates against the Fly platform, so it needs the token; nothing is changed.
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          for toml in servers/*/fly.toml; do flyctl config validate --strict --config "$toml"; done

@@ -1,0 +1,113 @@
+name: deploy
+
+# On a push to main: deploy each servers/<folder> whose image, fly.toml or server.env changed (staging first), check
+# it from outside with post-deploy-check.sh, then run conformance if a staging app was deployed. Nothing deploys unless
+# the whole tree passes check-pins and check-env first: a production pin that has not passed on staging is refused.
+# A folder with no image file is not deployed yet and is skipped.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: 'Redeploy one servers/<folder> as pinned (for example heygent-staging), after a secret change'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One deploy (and its conformance run) at a time, and never cancelled halfway.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      staging: ${{ steps.deploy.outputs.staging }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: check-pins (refuses an unpassed production pin)
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-pins.ts .
+      - name: check-env
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-env.ts .
+
+      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+        with:
+          version: 0.4.51
+
+      - name: choose folders
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          FOLDER: ${{ inputs.folder }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ]; then
+            [[ "$FOLDER" =~ ^[a-z0-9-]+$ ]] && [ -d "servers/$FOLDER" ] || { echo "no servers/$FOLDER" >&2; exit 1; }
+            changed="$FOLDER"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            changed="$(ls servers)"
+          else
+            changed="$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- servers/ | cut -d/ -f2 | sort -u)"
+          fi
+          echo "folders=$(echo $changed)" >> "$GITHUB_OUTPUT"
+          echo "changed: ${changed:-(none)}"
+
+      - name: deploy (staging first), then check each from outside
+        id: deploy
+        if: steps.plan.outputs.folders != ''
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FOLDERS: ${{ steps.plan.outputs.folders }}
+        run: |
+          set -euo pipefail
+          staging=false
+          app_of() { sed -nE 's/^app[[:space:]]*=[[:space:]]*"([a-z0-9-]+)".*/\1/p' "servers/$1/fly.toml"; }
+          first="" later=""
+          for f in $FOLDERS; do
+            if [ ! -d "servers/$f" ]; then echo "servers/$f was removed; nothing to deploy"
+            elif [[ "$(app_of "$f")" == *-staging ]]; then first="$first $f"
+            else later="$later $f"
+            fi
+          done
+          ordered="$first $later"
+          for f in $ordered; do
+            dir="servers/$f"
+            if [ ! -f "$dir/image" ]; then echo "$dir: no image yet, not deployed"; continue; fi
+            app="$(app_of "$f")"
+            image="$(cat "$dir/image")"
+            if [[ "$app" == *-staging ]]; then mode=test; else mode=production; fi
+            envs=()
+            while IFS= read -r line; do
+              case "$line" in '' | '#'*) continue ;; esac
+              envs+=(--env "$line")
+            done < "$dir/server.env"
+            echo "::group::deploy $app ($mode): $image"
+            flyctl deploy --app "$app" --config "$dir/fly.toml" --image "$image" --ha=false "${envs[@]}"
+            echo "::endgroup::"
+            scripts/post-deploy-check.sh "https://$app.fly.dev" "$mode"
+            echo "- \`$app\` ($mode): \`$image\`" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$mode" = test ]; then staging=true; fi
+          done
+          echo "staging=$staging" >> "$GITHUB_OUTPUT"
+
+  conformance:
+    needs: deploy
+    if: needs.deploy.outputs.staging == 'true'
+    uses: ./.github/workflows/conformance.yml
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
