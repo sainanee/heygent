@@ -11,6 +11,8 @@ REVOKE USAGE, CREATE ON SCHEMA public FROM anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated;
--- PUBLIC's EXECUTE is a built-in default, which only a default without IN SCHEMA can take away (for functions postgres
--- creates in any schema from now on).
+-- PUBLIC's EXECUTE on new functions is a built-in default, and a per-schema default (IN SCHEMA public) can only add to
+-- the built-in ones, never take them away (PostgreSQL's ALTER DEFAULT PRIVILEGES). So this one has no IN SCHEMA: it
+-- covers functions postgres creates in any schema from now on. Such functions stay executable by their owner, and by
+-- any role granted EXECUTE on them explicitly.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;

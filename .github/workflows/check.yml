@@ -83,10 +83,14 @@ jobs:
               echo "appends $line"
               ;;
             delist/*)
-              added="$(git diff -U0 HEAD^1 HEAD -- passed-on-staging.txt | grep -c '^+[^+]' || true)"
-              removed="$(git diff -U0 HEAD^1 HEAD -- passed-on-staging.txt | grep -c '^-[^-]' || true)"
-              [ "$added" -eq 0 ] && [ "$removed" -ge 1 ] || fail "a delist pull request only deletes lines"
-              git diff -U0 HEAD^1 HEAD -- passed-on-staging.txt | sed -n 's/^-\([^-]\)/delists \1/p'
+              # As sorted line multisets: the new file holds no line the base lacks, and the base loses at least one.
+              base_lines="$(printf '%s\n' "$base" | sort)"
+              new_lines="$(sort passed-on-staging.txt)"
+              added="$(comm -13 <(printf '%s\n' "$base_lines") <(printf '%s\n' "$new_lines"))"
+              removed="$(comm -23 <(printf '%s\n' "$base_lines") <(printf '%s\n' "$new_lines"))"
+              [ -z "$added" ] || fail "a delist pull request only deletes lines"
+              [ -n "$removed" ] || fail "a delist pull request deletes at least one line"
+              printf '%s\n' "$removed" | sed 's/^/delists /'
               ;;
             *) fail "changed only from a conformance/* (append) or delist/* (delete) branch" ;;
           esac

@@ -25,7 +25,15 @@ for app in heygent heygent-staging parley-peer parley-peer-staging; do fly apps 
 
 The server creates its own tables in the project's `postgres` database, schema `public`, at every start, as the `postgres` user; no extensions are needed.
 
-**2a. Turn each project's Data API off, before the app's first deploy.** By default Supabase grants new tables in `public` to its `anon` and `authenticated` roles and serves them at `https://<ref>.supabase.co/rest/v1/` (PostgREST) and `/graphql/v1` (pg_graphql, through the same Data API). The anon key is public by design, so with the Data API on, anyone could read and write Parley's tables: accounts, passkeys, sessions, threads and the server's private signing keys. Parley does not use the Data API. In each project: Project Settings → Data API, turn the Data API off; if the dashboard offers only the list of exposed schemas, remove `public` from it. (That dashboard path is unverified; if the new-project form offers to leave the Data API off, take that too.)
+**2a. Keep each project's Data API off, from the moment it is created.** By default Supabase grants new tables in `public` to its `anon` and `authenticated` roles and serves them at `https://<ref>.supabase.co/rest/v1/` (PostgREST) and `/graphql/v1` (pg_graphql, through the same Data API). The anon key is public by design, so with the Data API on, anyone could read and write Parley's tables: accounts, passkeys, sessions, threads and the server's private signing keys. Parley does not use the Data API.
+
+On the new-project form, set:
+
+- **Enable Data API**: off;
+- **Automatically expose new tables**: off;
+- **Enable automatic RLS**: your choice; off is what Parley has been tested with. A table's owner bypasses row-level security unless it is forced, and the server owns its tables, but whether this switch forces it is unverified: if you turn it on, Task 7 must confirm the server still works.
+
+For a project made without those switches (the fallback): Project Settings → Data API, turn the Data API off, or if the page offers only the list of exposed schemas, remove `public` from it (this path is unverified).
 
 **2b. Revoke the API roles' privileges, once per project** (defence in depth behind 2a: if the Data API is ever turned back on, the API roles still reach nothing). In the project's SQL editor (it runs as `postgres`; unverified), paste and run `sql/revoke-data-api-roles.sql`. It takes every privilege on schema `public`, its tables, sequences and functions from `anon` and `authenticated`, and changes `postgres`'s default privileges so the tables the server creates later are not granted to them. Nothing is taken from `postgres`, which the server uses and which owns what it creates. (Checked on PGlite set up with Supabase's default grants: afterwards `anon` and `authenticated` have no privilege on old or new tables, `postgres` reads, writes and fires triggers, and a second run is harmless. Not yet run on Supabase.)
 
@@ -81,14 +89,17 @@ A folder with no `image` file has not been deployed yet: the checks accept it, a
 scripts/check-data-api.sh <project-ref>
 ```
 
-It asks for the project's anon key (Project Settings → API keys) with hidden input, then asks REST (`GET /rest/v1/server_keys`) and GraphQL (`serverKeysCollection`) for the server's keys. A REST `200`, or GraphQL data for `serverKeysCollection`, means exposed: exit 1, and follow `incident.md`, "The Data API served Parley's tables". Any other answer is a refusal. Which code Supabase gives for each kind of refusal is unverified (likely `404` with the Data API off, `406` with `public` not exposed, `401`/`403` without privileges): record what you see. Also run, in the SQL editor:
+It asks for the project's anon key (Project Settings → API keys) with hidden input, then asks REST (`GET /rest/v1/server_keys`) and GraphQL (`serverKeysCollection`) for the server's keys. It fails closed:
 
-```sql
-SELECT grantee, table_name, privilege_type FROM information_schema.role_table_grants
-WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated');
-```
+| Exit | Meaning |
+|---|---|
+| 0 | Both refused, in a way it recognises: REST `404` (Data API off, or no `server_keys` in an exposed schema), `406` with `PGRST106` (`public` not exposed), or `401`/`403` with PostgreSQL's `42501` (permission denied); GraphQL `404`, `401`/`403` with `42501`, or `200` with `errors`. |
+| 1 | **Exposed**: REST `200`, or GraphQL data for `serverKeysCollection`. Follow `incident.md`, "The Data API served Parley's tables". |
+| 2 | **Could not verify**: no answer, a `5xx`, a `401`/`403` that is not a permission error (a mistyped or expired anon key gets `Invalid API key` from Supabase's gateway, and must never pass), or anything else. Check the ref and key, and run it again. |
 
-It must return no rows.
+A `401` counts as a refusal only by its `42501` body, which is how the script tells a permission refusal from a rejected key. Which code and body Supabase actually gives in each state is unverified: record what you see in Task 7, and if a refusal you trust comes out as exit 2, widen the script deliberately rather than ignore it.
+
+Then, in the SQL editor, run `sql/check-data-api-roles.sql`. Its first result counts the tables in `public` (0 means the app has not deployed yet); its second lists every table that `anon` or `authenticated` still holds any privilege on (`has_table_privilege`), and must be empty.
 
 **Delisting a digest** (a build found bad after it passed): a pull request from a `delist/<anything>` branch of this repo whose change to `passed-on-staging.txt` only deletes lines. `check.yml` allows exactly that, and nothing but a `conformance/*` branch may add a line. If a production folder is pinned to the delisted digest, re-pin it in the same pull request (`rollback.md`); `check-pins.ts` refuses a production pin whose digest is no longer listed.
 
