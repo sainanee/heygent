@@ -12,6 +12,7 @@ Secret values never go in this repo, in chat, in an issue or in a log. They are 
 | `FLY_TOKEN_HEYGENT`, `FLY_TOKEN_HEYGENT_STAGING`, `FLY_TOKEN_PARLEY_PEER`, `FLY_TOKEN_PARLEY_PEER_STAGING` | GitHub, `fly` environment | `deploy.yml` (each app's own token); `conformance.yml` (the two staging ones) | A Fly deploy token for that one app. |
 | `CONFORMANCE_HEYGENT_STAGING_KEY` | GitHub, `fly` environment | `conformance.yml` | `heygent-conformance:<heygent-staging's test key>` |
 | `CONFORMANCE_PEER_STAGING_KEY` | GitHub, `fly` environment | `conformance.yml` | `heygent-conformance:<parley-peer-staging's test key>` |
+| `PARLEY_DEPLOY_KEY` | GitHub, `fly` environment | `conformance.yml` (checks out the pinned image's commit of the private sainanee/parley) | The private half of an ed25519 deploy key added read-only to sainanee/parley alone. |
 
 GitHub secrets live only in the `fly` environment, which only `main` may use (`deploy.md`, step 6); there are no repository-level secrets.
 
@@ -45,6 +46,18 @@ unset key
 ```
 
 ## GitHub secrets: `gh secret set --env fly`
+
+**The parley deploy key** (once; while sainanee/parley is private). The private half goes straight into the secret and is deleted:
+
+```sh
+ssh-keygen -t ed25519 -N '' -C heygent-conformance -f /tmp/heygent-conformance
+gh repo deploy-key add /tmp/heygent-conformance.pub --repo sainanee/parley --title heygent-conformance
+gh secret set PARLEY_DEPLOY_KEY --env fly --repo sainanee/heygent < /tmp/heygent-conformance
+rm /tmp/heygent-conformance /tmp/heygent-conformance.pub
+```
+
+A deploy key is read-only by default, reaches that one repository, does not expire and is not tied to a person; revoke it under sainanee/parley → Settings → Deploy keys. If parley is made public, delete the key and the secret and drop `ssh-key` from `conformance.yml`.
+
 
 `gh secret set NAME --env fly --repo sainanee/heygent` asks for the value with hidden input; piped, it reads standard input.
 
