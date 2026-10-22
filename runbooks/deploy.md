@@ -21,6 +21,14 @@ Each step is an outward action: do it only when you mean to.
 for app in heygent heygent-staging parley-peer parley-peer-staging; do fly apps create "$app" --org <org>; done
 ```
 
+Then give each app its public addresses, with your own session (no charge for these two). The workflows cannot: a
+per-app deploy token may not allocate IPs (`org_slug is only supported with private_v6`), and an app without them
+deploys a healthy machine that nothing outside can reach (`post-deploy-check.sh` answers `000`).
+
+```sh
+for app in heygent heygent-staging parley-peer parley-peer-staging; do fly ips allocate-v6 --app "$app"; fly ips allocate-v4 --shared --app "$app"; done
+```
+
 **2. Four Supabase projects**, in the Supabase dashboard: one per app, named after the app (table above), region Singapore (`ap-southeast-1`). Choose Postgres 17 if it is offered: Parley's tests run on 17.6 and its operator guide asks for 17 (the migrations use nothing newer than Postgres 13 that we found, but only 17 is tested). Never share a project between two apps: the database is the server (accounts, passkeys, threads, its signing keys). Save each project's database password in your password manager; it goes nowhere else.
 
 The server creates its own tables in the project's `postgres` database, schema `public`, at every start, as the `postgres` user; no extensions are needed.
