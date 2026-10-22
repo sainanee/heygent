@@ -1,8 +1,9 @@
 // Reads servers/*: each folder is one Fly app. Its fly.toml names the app; its `image` file, when present, pins the
 // image (no file = not deployed yet). An app is staging when its name ends in `-staging`, and production otherwise:
 // the name decides, never the folder's own settings, so a production app that claims test mode is still production.
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface Server {
   /** The folder name under servers/. */
@@ -39,6 +40,11 @@ export function readServers(root: string): Server[] {
         image: existsSync(imageFile) ? readFileSync(imageFile, 'utf8') : null,
       };
     });
+}
+
+/** True when the module at `url` is the script node was started with (not imported). */
+export function isMain(url: string): boolean {
+  return process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(url);
 }
 
 /** Runs a check over the repo at argv[2] (default .): prints its problems to stderr and exits 1 if there are any. */

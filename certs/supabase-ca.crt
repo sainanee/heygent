@@ -1,0 +1,3 @@
+PLACEHOLDER, NOT A CERTIFICATE. The owner replaces this whole file with Supabase's root CA certificate (PEM),
+downloaded from a Supabase project's dashboard: runbooks/deploy.md, "Supabase's root CA".
+deploy.yml refuses to deploy while this file is not a PEM certificate.

@@ -54,3 +54,22 @@ test('pin check accepts a folder with no image yet', () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /servers\/heygent: no image yet/);
 });
+
+test('pin check rejects a digest pin of another repository', () => {
+  // A digest names content, but conformance ran Parley's image: a pin elsewhere is refused even with a passed digest.
+  const root = makeTree(
+    { heygent: { app: 'heygent', image: `ghcr.io/someone-else/parley-server@${DIGEST_A}\n` } },
+    [DIGEST_A],
+  );
+  const r = checkPins(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /servers\/heygent\/image: must be one line, ghcr\.io\/sainanee\/parley-server@sha256/);
+});
+
+test('pin check rejects a line in passed-on-staging.txt that is not a digest', () => {
+  // A full image reference (or any junk) is not how the conformance workflow records a pass.
+  const root = makeTree({ heygent: { app: 'heygent' } }, [DIGEST_A, `ghcr.io/sainanee/parley-server@${DIGEST_B}`]);
+  const r = checkPins(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /passed-on-staging\.txt:3: not a digest/);
+});

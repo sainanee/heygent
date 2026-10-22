@@ -2,8 +2,8 @@
 # The image comes from ./image (deploy.yml passes it as --image) and the settings from ./server.env (passed as --env);
 # secrets live only in Fly's store (runbooks/secrets.md). Deploy only through deploy.yml.
 app = "heygent"
-# All four apps share one Managed Postgres cluster: keep this the cluster's region (runbooks/deploy.md).
-primary_region = "lhr"
+# Singapore, next to the app's Supabase project (ap-southeast-1; runbooks/deploy.md).
+primary_region = "sin"
 
 [deploy]
   # One machine, one copy of the server per database: never bluegreen or canary, which run two copies at once.
@@ -28,3 +28,9 @@ primary_region = "lhr"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
+
+# Supabase's root CA, which DATABASE_URL names as sslrootcert (runbooks/deploy.md). deploy.yml runs flyctl from this
+# folder, so the path is the same whether flyctl reads it relative to fly.toml or to its working directory.
+[[files]]
+  guest_path = "/etc/parley/supabase-ca.crt"
+  local_path = "../../certs/supabase-ca.crt"

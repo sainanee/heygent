@@ -5,7 +5,7 @@
 // The same file is also checked by the pinned image's own loadConfig in check.yml.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readServers, runCheck, type Server } from './servers.ts';
+import { isMain, readServers, runCheck, type Server } from './servers.ts';
 
 const SECRETS = new Set(['DATABASE_URL', 'PARLEY_SECRET_KEY', 'PARLEY_TEST_KEYS']);
 /** Optional settings config.ts accepts that this network may use (JSON or a list; config.ts checks the contents). */
@@ -60,4 +60,4 @@ export function checkEnv(root: string): { problems: string[]; notes: string[] } 
   return { problems, notes: servers.map((s) => `servers/${s.folder}: ${s.app} (${s.production ? 'production' : 'staging'})`) };
 }
 
-runCheck('check-env', checkEnv);
+if (isMain(import.meta.url)) runCheck('check-env', checkEnv);

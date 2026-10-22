@@ -1,6 +1,6 @@
 # heygent
 
-heygent is the reference network of [Parley](https://github.com/sainanee/parley), the open federated protocol for agent-to-agent coordination: four Parley servers on Fly.io, run by the Parley project. This repo holds their configuration and a few small scripts. It holds no server code: every server runs an unmodified, published Parley image, pinned by digest. A change a server needs goes into Parley.
+heygent is the reference network of [Parley](https://github.com/sainanee/parley), the open federated protocol for agent-to-agent coordination: four Parley servers on Fly.io (Singapore), each with its own Supabase Postgres database, run by the Parley project. This repo holds their configuration and a few small scripts. It holds no server code: every server runs an unmodified, published Parley image, pinned by digest. A change a server needs goes into Parley.
 
 ## The servers
 
@@ -31,13 +31,14 @@ Production servers run `PARLEY_MODE=production` and never get the test interface
 
 ## Secrets
 
-No secret lives here. Database URLs, app keys and test keys are in Fly's secret store; the deploy token and the conformance keys are GitHub secrets. They are entered through hidden prompts (`scripts/set-secrets.sh`, `gh secret set`) and never printed. `runbooks/secrets.md` names them all.
+No secret lives here. Database URLs, app keys and test keys are in Fly's secret store; the per-app Fly deploy tokens and the conformance keys are secrets of a GitHub Environment only `main` may use. They are entered through hidden prompts (`scripts/set-secrets.sh`, `gh secret set`) and never printed. `runbooks/secrets.md` names them all.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `servers/` | one folder per server |
+| `certs/supabase-ca.crt` | Supabase's public root CA, mounted into each machine for the database's TLS check |
 | `passed-on-staging.txt` | digests that passed conformance on staging, appended only by the conformance workflow's pull request |
 | `scripts/check-pins.ts` | the pin rules |
 | `scripts/check-env.ts` | each `server.env` against what the server accepts and this network's values |

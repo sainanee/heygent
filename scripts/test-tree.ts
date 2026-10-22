@@ -1,6 +1,6 @@
 // Test helper: a throwaway copy of this repo's layout (servers/*, passed-on-staging.txt), and a run of one of the
 // check scripts against it as CI runs them (a separate node process, exit code and stderr).
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +36,7 @@ export function makeTree(servers: Record<string, ServerSpec>, passed: string[] =
   for (const [folder, spec] of Object.entries(servers)) {
     const dir = join(root, 'servers', folder);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'fly.toml'), `app = "${spec.app}"\nprimary_region = "lhr"\n`);
+    writeFileSync(join(dir, 'fly.toml'), `app = "${spec.app}"\nprimary_region = "sin"\n`);
     writeFileSync(join(dir, 'server.env'), spec.env ?? goodEnv(spec.app));
     if (spec.image !== undefined) writeFileSync(join(dir, 'image'), spec.image);
   }
@@ -51,4 +51,22 @@ export function runScript(script: string, root: string): { status: number | null
     { encoding: 'utf8' },
   );
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+/** Runs one of this repo's shell scripts with bash, asynchronously (a test may serve HTTP from this process meanwhile). */
+export function runShell(
+  script: string,
+  args: string[],
+  opts: { input?: string; env?: Record<string, string> } = {},
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('bash', [script, ...args], { env: { ...process.env, ...opts.env } });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => (stdout += d));
+    child.stderr.on('data', (d) => (stderr += d));
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+    child.stdin.end(opts.input ?? '');
+  });
 }

@@ -7,6 +7,9 @@ name: conformance
 #
 # What a run does to staging: fresh accounts each time, and both servers' clocks move about 8 days forward and stay
 # there (runbooks/deploy.md).
+#
+# Runs only on main; the staging apps' Fly tokens and the conformance keys come from the `fly` GitHub Environment,
+# which only main may use.
 on:
   workflow_call:
   workflow_dispatch:
@@ -23,6 +26,8 @@ env:
 
 jobs:
   run:
+    if: github.ref == 'refs/heads/main'
+    environment: fly
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
@@ -30,7 +35,7 @@ jobs:
       revision: ${{ steps.pin.outputs.revision }}
       summary: ${{ steps.suite.outputs.summary }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
@@ -51,17 +56,17 @@ jobs:
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
           echo "image $a, built from sainanee/parley@$revision"
 
-      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+      - uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # 1.5
         with:
           version: 0.4.51
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: sainanee/parley
           ref: ${{ steps.pin.outputs.revision }}
           path: parley
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - name: install the conformance suite
@@ -74,7 +79,8 @@ jobs:
         id: suite
         working-directory: parley
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_TOKEN_HEYGENT_STAGING: ${{ secrets.FLY_TOKEN_HEYGENT_STAGING }}
+          FLY_TOKEN_PARLEY_PEER_STAGING: ${{ secrets.FLY_TOKEN_PARLEY_PEER_STAGING }}
           CONFORMANCE_HEYGENT_STAGING_KEY: ${{ secrets.CONFORMANCE_HEYGENT_STAGING_KEY }}
           CONFORMANCE_PEER_STAGING_KEY: ${{ secrets.CONFORMANCE_PEER_STAGING_KEY }}
           DIGEST: ${{ steps.pin.outputs.digest }}
@@ -82,9 +88,10 @@ jobs:
           set -euo pipefail
           # Each staging app must be running exactly the pinned digest, on one started machine (the runner reads one
           # clock per server), before and after the run: otherwise the result belongs to some other image.
+          token_of() { local v; v="FLY_TOKEN_$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; printf '%s' "${!v:-}"; }
           running() {
             for app in "$A_APP" "$B_APP"; do
-              machines="$(flyctl machine list --app "$app" --json)"
+              machines="$(FLY_API_TOKEN="$(token_of "$app")" flyctl machine list --app "$app" --json)"
               echo "$machines" | jq -r --arg app "$app" '.[] | "\($app): machine \(.id) \(.state) \(.image_ref.digest)"'
               echo "$machines" | jq -e --arg d "$DIGEST" 'length == 1 and .[0].state == "started" and .[0].image_ref.digest == $d' >/dev/null ||
                 { echo "$app is not running exactly one started machine on $DIGEST" >&2; return 1; }
@@ -103,47 +110,54 @@ jobs:
 
           out="$RUNNER_TEMP/conformance.txt"
           set +e
-          env -u FLY_API_TOKEN node --experimental-strip-types --disable-warning=ExperimentalWarning packages/conformance/src/cli.ts \
+          env -u FLY_TOKEN_HEYGENT_STAGING -u FLY_TOKEN_PARLEY_PEER_STAGING node --experimental-strip-types --disable-warning=ExperimentalWarning packages/conformance/src/cli.ts \
             --a "https://$A_APP.fly.dev" --a-key CONFORMANCE_HEYGENT_STAGING_KEY \
             --b "https://$B_APP.fly.dev" --b-key CONFORMANCE_PEER_STAGING_KEY \
             ${prod[@]+"${prod[@]}"} | tee "$out"
           code="${PIPESTATUS[0]}"
           set -e
 
-          # Exit 0: every case passed. Exit 3: none failed, some skipped. A skip is accepted only for a case that needs
-          # the third origin (no --third yet; runbooks/deploy.md), or for production-hides-test-interface while no
-          # production server is deployed. Anything else fails the run.
-          allowed="$(env -u FLY_API_TOKEN -u CONFORMANCE_HEYGENT_STAGING_KEY -u CONFORMANCE_PEER_STAGING_KEY \
+          # Exit 0: every case passed. Exit 3: none failed, some skipped. Either way every one of the suite's cases (its own
+          # list, at the pinned commit) must have printed PASS or SKIP. A skip is accepted only for a case that needs the
+          # third origin (no --third yet; runbooks/deploy.md), whatever its reason, or for production-hides-test-interface
+          # while no production server is deployed. Anything else fails the run.
+          lists="$(env -u FLY_TOKEN_HEYGENT_STAGING -u FLY_TOKEN_PARLEY_PEER_STAGING -u CONFORMANCE_HEYGENT_STAGING_KEY -u CONFORMANCE_PEER_STAGING_KEY \
             node --experimental-strip-types --disable-warning=ExperimentalWarning --input-type=module \
-            -e "const m = await import('./packages/conformance/src/runner.ts'); console.log(m.THIRD_ORIGIN_CASES.join(' '))")"
+            -e "const m = await import('./packages/conformance/src/runner.ts'); console.log(m.CASE_NAMES.length); console.log(m.THIRD_ORIGIN_CASES.join(' '))")"
+          cases="$(echo "$lists" | sed -n 1p)"
+          allowed="$(echo "$lists" | sed -n 2p)"
           if [ "$nprod" -eq 0 ]; then allowed="$allowed production-hides-test-interface"; fi
+          passed="$(grep -c '^PASS ' "$out" || true)"
+          skipped="$(grep -c '^SKIP ' "$out" || true)"
           case "$code" in
-            0) ;;
+            0) [ "$skipped" -eq 0 ] || { echo "exit 0 with skips" >&2; exit 1; } ;;
             3)
+              [ "$skipped" -ge 1 ] || { echo "exit 3 but no SKIP line was read" >&2; exit 1; }
               for name in $(sed -n 's/^SKIP \([^ ]*\).*/\1/p' "$out"); do
                 case " $allowed " in *" $name "*) ;; *) echo "$name skipped, and only third-origin cases may skip" >&2; exit 1 ;; esac
               done
               ;;
             *) echo "conformance exited $code" >&2; exit 1 ;;
           esac
+          [[ "$cases" =~ ^[0-9]+$ ]] && [ $((passed + skipped)) -eq "$cases" ] ||
+            { echo "$passed passed + $skipped skipped is not the suite's $cases cases" >&2; exit 1; }
 
           running
 
-          passed="$(grep -c '^PASS ' "$out" || true)"
-          skipped="$(grep -c '^SKIP ' "$out" || true)"
           summary="$passed passed, $skipped skipped (allowed skips only), production servers checked: $nprod"
           echo "summary=$summary" >> "$GITHUB_OUTPUT"
           { echo "### Conformance passed: \`$DIGEST\`"; echo; echo "$summary"; echo; echo '```'; cat "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   record:
     needs: run
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: main
       - name: open a pull request adding the digest to passed-on-staging.txt

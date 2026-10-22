@@ -3,7 +3,7 @@
 // image file is not deployed yet and passes. Exits 1 on any problem.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readServers, runCheck } from './servers.ts';
+import { isMain, readServers, runCheck } from './servers.ts';
 
 const PIN = /^ghcr\.io\/sainanee\/parley-server@(sha256:[0-9a-f]{64})\n?$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
@@ -47,4 +47,4 @@ export function checkPins(root: string): { problems: string[]; notes: string[] }
   return { problems, notes };
 }
 
-runCheck('check-pins', checkPins);
+if (isMain(import.meta.url)) runCheck('check-pins', checkPins);

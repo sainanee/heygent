@@ -1,7 +1,8 @@
 name: check
 
-# Every pull request: the pin rules, each server.env (by this repo's schema check and by the pinned image's own config
-# loader), the shell scripts, and each fly.toml against the Fly platform.
+# Every pull request: the scripts' tests, the pin rules, each server.env (by this repo's schema check and by the pinned
+# image's own config loader), the passed-on-staging.txt rule, and shellcheck. No secrets: this runs pull request code.
+# (fly config validate needs a Fly token, so it runs in deploy.yml, on main only.)
 on:
   pull_request:
   workflow_dispatch:
@@ -18,8 +19,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
 
@@ -51,18 +55,29 @@ jobs:
               -e "const m = await import('./apps/server/src/config.ts'); m.loadConfig(process.env); console.log('config ok');"
           done
 
+      - name: passed-on-staging.txt changes only by the conformance workflow's pull request
+        # Such a pull request comes from a conformance/* branch of this repository, changes nothing else, and appends
+        # exactly one new digest. (Speed bump, not the lock: the lock is the main ruleset and the owner's review.)
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The checkout is the pull request merged into its base; HEAD^1 is that base.
+          if git diff --quiet HEAD^1 HEAD -- passed-on-staging.txt; then echo "passed-on-staging.txt unchanged"; exit 0; fi
+          fail() { echo "passed-on-staging.txt: $*" >&2; exit 1; }
+          [ "$HEAD_REPO" = "$REPO" ] && [[ "$HEAD_REF" == conformance/* ]] || fail "changed only from a conformance/* branch of $REPO"
+          [ "$(git diff --name-only HEAD^1 HEAD)" = passed-on-staging.txt ] || fail "its pull request changes nothing else"
+          base="$(git show HEAD^1:passed-on-staging.txt)"
+          line="$(tail -n 1 passed-on-staging.txt)"
+          [[ "$line" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "the appended line is not a digest"
+          [ "$(cat passed-on-staging.txt)" = "$base"$'\n'"$line" ] || fail "exactly one line may be appended, nothing else changed"
+          ! grep -qxF "$line" <(printf '%s\n' "$base") || fail "$line is already listed"
+          echo "appends $line"
+
       - name: shellcheck
         run: |
           command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
           shellcheck scripts/*.sh
-
-      - uses: superfly/flyctl-actions/setup-flyctl@1.5
-        with:
-          version: 0.4.51
-      - name: fly config validate
-        # Validates against the Fly platform, so it needs the token; nothing is changed.
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          for toml in servers/*/fly.toml; do flyctl config validate --strict --config "$toml"; done

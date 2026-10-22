@@ -5,7 +5,9 @@
 # store in one `fly secrets import --stage` (the next deploy picks them up). Values never appear on screen, on any
 # command line, in a file or in a log: they stay in this shell's memory and go to flyctl on its standard input.
 #
-#   every app:     DATABASE_URL       the app's own database, as its own role (runbooks/deploy.md)
+#   every app:     DATABASE_URL       the app's own Supabase database (runbooks/deploy.md): port 5432 (direct or the
+#                                     session pooler, never the transaction pooler on 6543), with
+#                                     sslmode=verify-full&sslrootcert=/etc/parley/supabase-ca.crt
 #                  PARLEY_SECRET_KEY  at least 32 characters (openssl rand -base64 32)
 #   staging only:  PARLEY_TEST_KEYS   the conformance runner's test-interface key (43 base64url characters)
 #
@@ -13,11 +15,13 @@
 set -euo pipefail
 
 TEST_PEER_LABEL=heygent-conformance
+CA_PATH=/etc/parley/supabase-ca.crt
 
 die() { echo "set-secrets: $*" >&2; exit 1; }
 [ $# -ge 1 ] || die "usage: $0 <app> [DATABASE_URL|PARLEY_SECRET_KEY|PARLEY_TEST_KEYS ...]"
 app="$1"
 shift
+printf '%s' "$app" | grep -Eqx '[a-z0-9][a-z0-9-]*' || die "an app name is lowercase letters, digits and hyphens"
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 folder=''
@@ -64,8 +68,15 @@ payload=''
 for name in $names; do
   case "$name" in
     DATABASE_URL)
-      ask "DATABASE_URL for $app (its own role on its own database, the direct URL)"
-      case "$answer" in postgres://* | postgresql://*) ;; *) die "DATABASE_URL must start with postgres:// or postgresql://; nothing was set" ;; esac
+      ask "DATABASE_URL for $app (port 5432, ending ?sslmode=verify-full&sslrootcert=$CA_PATH)"
+      # Checked without printing it: a postgres URL, port 5432 (direct or session pooler, never the transaction
+      # pooler on 6543), and TLS verified against Supabase's root CA, which fly.toml mounts at $CA_PATH.
+      printf '%s' "$answer" | grep -Eq '^postgres(ql)?://[^/?]+:5432/' ||
+        die "DATABASE_URL must be postgres:// or postgresql:// with port 5432 (never the transaction pooler, 6543); nothing was set"
+      printf '%s' "$answer" | grep -Eq '[?&]sslmode=verify-full(&|$)' ||
+        die "DATABASE_URL must carry sslmode=verify-full; nothing was set"
+      printf '%s' "$answer" | grep -Eq '[?&]sslrootcert=/etc/parley/supabase-ca\.crt(&|$)' ||
+        die "DATABASE_URL must carry sslrootcert=$CA_PATH; nothing was set"
       value="$answer"
       ;;
     PARLEY_SECRET_KEY)

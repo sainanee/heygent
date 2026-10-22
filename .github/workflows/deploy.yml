@@ -4,6 +4,9 @@ name: deploy
 # it from outside with post-deploy-check.sh, then run conformance if a staging app was deployed. Nothing deploys unless
 # the whole tree passes check-pins and check-env first: a production pin that has not passed on staging is refused.
 # A folder with no image file is not deployed yet and is skipped.
+#
+# Runs only on main. Its Fly tokens and the conformance keys live in the `fly` GitHub Environment, which only main may
+# use (runbooks/deploy.md), so no other branch's code can reach them.
 on:
   push:
     branches: [main]
@@ -24,16 +27,18 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
+    environment: fly
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
       staging: ${{ steps.deploy.outputs.staging }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
 
@@ -42,7 +47,7 @@ jobs:
       - name: check-env
         run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-env.ts .
 
-      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+      - uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # 1.5
         with:
           version: 0.4.51
 
@@ -69,12 +74,17 @@ jobs:
         id: deploy
         if: steps.plan.outputs.folders != ''
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          # One deploy token per app (fly tokens create deploy), named FLY_TOKEN_<APP>.
+          FLY_TOKEN_HEYGENT: ${{ secrets.FLY_TOKEN_HEYGENT }}
+          FLY_TOKEN_HEYGENT_STAGING: ${{ secrets.FLY_TOKEN_HEYGENT_STAGING }}
+          FLY_TOKEN_PARLEY_PEER: ${{ secrets.FLY_TOKEN_PARLEY_PEER }}
+          FLY_TOKEN_PARLEY_PEER_STAGING: ${{ secrets.FLY_TOKEN_PARLEY_PEER_STAGING }}
           FOLDERS: ${{ steps.plan.outputs.folders }}
         run: |
           set -euo pipefail
           staging=false
           app_of() { sed -nE 's/^app[[:space:]]*=[[:space:]]*"([a-z0-9-]+)".*/\1/p' "servers/$1/fly.toml"; }
+          token_of() { local v; v="FLY_TOKEN_$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; printf '%s' "${!v:-}"; }
           first="" later=""
           for f in $FOLDERS; do
             if [ ! -d "servers/$f" ]; then echo "servers/$f was removed; nothing to deploy"
@@ -86,6 +96,9 @@ jobs:
           for f in $ordered; do
             dir="servers/$f"
             if [ ! -f "$dir/image" ]; then echo "$dir: no image yet, not deployed"; continue; fi
+            # DATABASE_URL names this file as sslrootcert: never deploy with the placeholder.
+            openssl x509 -in certs/supabase-ca.crt -noout 2>/dev/null ||
+              { echo "certs/supabase-ca.crt is not a PEM certificate (runbooks/deploy.md, Supabase's root CA)" >&2; exit 1; }
             app="$(app_of "$f")"
             image="$(cat "$dir/image")"
             if [[ "$app" == *-staging ]]; then mode=test; else mode=production; fi
@@ -94,8 +107,14 @@ jobs:
               case "$line" in '' | '#'*) continue ;; esac
               envs+=(--env "$line")
             done < "$dir/server.env"
+            FLY_API_TOKEN="$(token_of "$app")"
+            [ -n "$FLY_API_TOKEN" ] || { echo "no FLY_TOKEN for $app in the fly environment" >&2; exit 1; }
+            export FLY_API_TOKEN
             echo "::group::deploy $app ($mode): $image"
-            flyctl deploy --app "$app" --config "$dir/fly.toml" --image "$image" --ha=false "${envs[@]}"
+            # From the folder itself, so fly.toml's [[files]] local_path resolves the same whichever base flyctl uses.
+            (cd "$dir" && flyctl config validate --strict --config fly.toml)
+            (cd "$dir" && flyctl deploy --app "$app" --config fly.toml --image "$image" --ha=false "${envs[@]}")
+            unset FLY_API_TOKEN
             echo "::endgroup::"
             scripts/post-deploy-check.sh "https://$app.fly.dev" "$mode"
             echo "- \`$app\` ($mode): \`$image\`" >> "$GITHUB_STEP_SUMMARY"
@@ -107,7 +126,6 @@ jobs:
     needs: deploy
     if: needs.deploy.outputs.staging == 'true'
     uses: ./.github/workflows/conformance.yml
-    secrets: inherit
     permissions:
       contents: write
       pull-requests: write
