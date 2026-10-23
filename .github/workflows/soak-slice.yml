@@ -1,6 +1,6 @@
 name: soak-slice
 
-# One slice of the soak, called four times by soak.yml (never run alone): checks both staging apps run the soak's digest
+# One slice of the soak, called five times by soak.yml (never run alone): checks both staging apps run the soak's digest
 # on one started machine, runs scripts/soak.ts for `minutes` (resuming the scenario an earlier slice left as an artifact;
 # slice 1 sets one up), checks the digest again, and leaves the scenario for the next slice. With `final`, scripts/soak.ts
 # then lets the servers settle and gives the verdict (runbooks/soak.md).
@@ -40,6 +40,11 @@ jobs:
     environment: fly
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    # Shared with conformance.yml's run: a soak slice and a conformance run never touch staging at once (conformance
+    # moves both clocks by days and pauses and resumes both servers).
+    concurrency:
+      group: staging
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -118,7 +123,10 @@ jobs:
           flags=(--minutes "$MINUTES")
           if [ "$SLICE" = 1 ]; then flags+=(--new); fi
           if [ "$FINAL" = true ]; then flags+=(--final); fi
-          # The keys and Fly tokens reach the soak through its environment only (it hands each Fly token to flyctl alone).
+          # The keys and Fly tokens reach the soak through its environment only, never argv. Unlike conformance.yml, which
+          # keeps the Fly tokens from the suite (`export -n`), the soak needs them, for `fly machine restart`: it reads
+          # them and deletes them from its own process.env before it loads the Parley driver, and hands each one to
+          # flyctl alone (an environment of PATH, HOME and that token).
           set +e
           node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/soak.ts \
             --parley parley --state "$RUNNER_TEMP/soak/state.json" "${flags[@]}" | tee "$RUNNER_TEMP/soak.log"
@@ -135,6 +143,13 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
+
+      - name: on a cancel, resume both servers (in case the soak was stopped before it could)
+        if: cancelled()
+        env:
+          CONFORMANCE_HEYGENT_STAGING_KEY: ${{ secrets.CONFORMANCE_HEYGENT_STAGING_KEY }}
+          CONFORMANCE_PEER_STAGING_KEY: ${{ secrets.CONFORMANCE_PEER_STAGING_KEY }}
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/soak.ts --parley parley --release
 
       - name: leave the scenario for the next slice
         if: always()

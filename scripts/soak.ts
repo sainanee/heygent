@@ -1,12 +1,15 @@
-// soak.ts: the staging pair's soak (Task 8 Step 6), run by soak.yml as four chained jobs of about 6 hours each.
+// soak.ts: the staging pair's soak (Task 8 Step 6), run by soak.yml as five chained jobs of about 5 hours each.
 //
 //   soak.ts --parley <dir> --state <file> --minutes <n> [--new] [--final] [--a <origin>] [--b <origin>]
+//   soak.ts --parley <dir> --release        (resume both servers' outbound calls, nothing else: after a cancel)
 //
 // People on both staging servers, each with an agent connected through the real OAuth ceremony, Connect across the
 // two servers and then trade Plan moves (propose, counter, accept, decline, withdraw, cancel) on many threads, a move
-// every few seconds. Meanwhile, at random intervals, the soak cuts one or both servers off (the test interface's
+// every 24 seconds or so. Meanwhile, at random intervals, the soak cuts one or both servers off (the test interface's
 // pause_outbound, always resumed) or restarts one server's Fly machine. With --final it then resumes both, lets them
-// settle, and judges: no thread stuck, no new alert open, both servers' views of every shared thread identical.
+// settle, and judges: no thread stuck, no new alert open, both servers' views of every shared thread identical, and
+// the soak itself did what it claims (enough moves applied, partitions healed, each app's machine restarted). A server
+// clock moved under it (conformance moves them by days) fails it.
 //
 // --parley   a checkout of sainanee/parley at the staging image's revision, with the conformance package installed: the
 //            soak drives the servers with that package's driver (packages/conformance/src/peer.ts and flows.ts).
@@ -18,8 +21,8 @@
 //
 // The keys come from the environment only: CONFORMANCE_HEYGENT_STAGING_KEY and CONFORMANCE_PEER_STAGING_KEY
 // (`<label>:<base64url key>`), and FLY_TOKEN_HEYGENT_STAGING and FLY_TOKEN_PARLEY_PEER_STAGING, each app's deploy
-// token, handed to flyctl alone (for `fly machine restart`). Without the Fly tokens the soak makes no restarts and
-// says so. Output: one JSON line per event; with --final, then `NOTE`/`FAIL` lines and a `soak: PASS|FAIL` summary.
+// token, handed to flyctl alone (for `fly machine restart`). Without the Fly tokens the soak makes no restarts, and its
+// verdict fails. Output: one JSON line per event; with --final, then `NOTE`/`FAIL` lines and a `soak: PASS|FAIL` summary.
 // Exit: 0 done (with --final: passed), 1 failed or stalled, 2 refused (usage, a server not in the staging pair, a bad
 // state file, a missing key).
 import { spawn } from 'node:child_process';
@@ -88,8 +91,12 @@ export interface SoakState {
   threads: { thread_id: string; initiator: string; invitee: string; applied: boolean; done: boolean }[];
   /** Alerts already open when the soak began: noted at the end, not counted against it. */
   alerts_at_start: { side: Side; kind: string; subject: string }[];
-  /** Why the soak makes no machine restarts, or null. */
+  /** Why the soak can make no machine restarts (no Fly token, or flyctl refused the token), or null. */
   restarts_unavailable: string | null;
+  /** Each server's clock offset (its time minus the runner's) at the last read, to catch anyone else moving it. */
+  clock: { a: number | null; b: number | null };
+  /** What already failed the soak (a clock moved under it): printed as FAIL by the verdict. */
+  failures: string[];
   counts: Record<string, number>;
 }
 
@@ -111,6 +118,8 @@ function plain(s: SoakState): SoakState {
     threads: s.threads.map((t) => ({ thread_id: str(t.thread_id), initiator: str(t.initiator), invitee: str(t.invitee), applied: t.applied === true, done: t.done === true })),
     alerts_at_start: s.alerts_at_start.map((x) => ({ side: x.side === 'b' ? 'b' : 'a', kind: str(x.kind), subject: str(x.subject) })),
     restarts_unavailable: typeof s.restarts_unavailable === 'string' ? s.restarts_unavailable : null,
+    clock: { a: Number.isFinite(s.clock?.a) ? (s.clock.a as number) : null, b: Number.isFinite(s.clock?.b) ? (s.clock.b as number) : null },
+    failures: (Array.isArray(s.failures) ? s.failures : []).filter((f) => typeof f === 'string' && /^[\x20-\x7e]{1,300}$/.test(f)),
     counts: Object.fromEntries(Object.entries(s.counts).filter(([k, v]) => COUNT_NAME.test(k) && Number.isSafeInteger(v))),
   };
 }
@@ -286,6 +295,27 @@ export function judge(s: SoakState, input: JudgeInput): { problems: string[]; no
   return { problems, notes, threads: compared };
 }
 
+/** What a whole soak must have done for its verdict to mean anything (about 2,700 moves are made in a full one). */
+export const MINIMUMS = { applied: 1000, partitions: 1, restartsPerApp: 1 };
+
+/**
+ * What the soak failed to do: too few moves applied, no partition made and healed, no completed machine restart of each
+ * staging app (or restarts impossible). A soak that did not do these has not tested what it claims, so each is a FAIL.
+ */
+export function coverage(s: SoakState, apps: readonly string[], min = MINIMUMS): string[] {
+  const c = s.counts;
+  const problems: string[] = [];
+  if ((c.applied ?? 0) < min.applied) problems.push(`only ${c.applied ?? 0} moves were applied; a full soak applies at least ${min.applied}`);
+  if ((c.partitions_healed ?? 0) < min.partitions) problems.push(`${c.partitions_healed ?? 0} partitions were made and healed; at least ${min.partitions} expected`);
+  if (s.restarts_unavailable === 'flyctl_not_permitted') problems.push('machine restarts are not possible with the apps\' deploy tokens (flyctl_not_permitted)');
+  else if (s.restarts_unavailable !== null) problems.push(`machine restarts were not possible (${s.restarts_unavailable})`);
+  for (const app of apps) {
+    const n = c[`restarted:${app}`] ?? 0;
+    if (n < min.restartsPerApp) problems.push(`${n} machine restarts of ${app} completed; at least ${min.restartsPerApp} expected`);
+  }
+  return problems;
+}
+
 // ------------------------------------------------------------------ logging
 
 /**
@@ -333,7 +363,7 @@ export interface Timing {
 }
 
 export const TIMING: Timing = {
-  tickMs: 12_000,
+  tickMs: 24_000,
   faultMs: [10 * MIN, 40 * MIN],
   partitionMs: [1 * MIN, 20 * MIN],
   faultFreeTailMs: 10 * MIN,
@@ -348,10 +378,20 @@ export const TIMING: Timing = {
 
 /** The servers' clocks may be at most this far apart (as the conformance runner holds them): federation's window. */
 const MAX_CLOCK_GAP_MS = 60_000;
+/** A server's clock may move this far against the runner's between two reads; more means someone moved it. */
+const MAX_CLOCK_JUMP_MS = 60_000;
 /** The soak keeps at most this many unfinished Plan threads per pair (the coordinator allows 5 open, reservations included). */
 const MAX_OPEN_PER_PAIR = 3;
-/** How likely each legal move is chosen, when the person may make it. */
-const WEIGHTS: Record<string, number> = { counter: 3, accept: 3, decline: 1, withdraw: 1, cancel: 1 };
+/**
+ * And starts at most this many Plan threads per pair in all, so the verdict's reads stay modest: at most 1,080 Plan
+ * threads, about 360 per person (GET /test/v1/state reads each person's threads one by one). At one move every 24 s a
+ * full soak starts about 830 (at most about 110 on one pair, by a simulation of this mix), so the cap rarely binds.
+ */
+const MAX_PLAN_THREADS_PER_PAIR = 120;
+/** A pair with fewer than MAX_OPEN_PER_PAIR unfinished threads starts another on this share of its turns (always at none). */
+const PROPOSE_WHILE_OPEN = 0.1;
+/** How likely each legal move is chosen, when the person may make it: counters first, so threads run a few moves. */
+const WEIGHTS: Record<string, number> = { counter: 5, accept: 2, decline: 1, withdraw: 1, cancel: 1 };
 /** An agreed plan is cancelled on this share of visits; on the others it is left agreed (and no longer moved). */
 const CANCEL_AGREED = 0.3;
 /** The maker of an open offer, picked to move, withdraws it on this share of turns (and otherwise passes). */
@@ -394,7 +434,16 @@ export interface SoakOptions {
   print(line: string): void;
   sleep(ms: number): Promise<void>;
   stopped(): boolean;
+  /** Register what to do at once when the run is told to stop (before any in-flight call finishes). */
+  onStop(fn: () => void): void;
+  /** What the verdict requires the soak to have done (MINIMUMS unless a test says otherwise). */
+  minimums?: typeof MINIMUMS;
   random?: () => number;
+}
+
+/** Something under the soak went wrong in a way that fails it (a clock moved): the run stops trading moves. */
+export class SoakFailed extends Error {
+  override name = 'SoakFailed';
 }
 
 /** The soak itself: setup or resume, the moves and faults until its time is up, and with `final` the verdict. */
@@ -420,9 +469,25 @@ export async function runSoak(o: SoakOptions): Promise<number> {
     for (const n of names) s.counts[n] = (s.counts[n] ?? 0) + 1;
   };
 
-  // ---- the servers' clocks: read (never moved), and in step.
+  // ---- the servers' clocks: read (never moved), in step, and not moved by anyone else (conformance does, by days).
+  const lastOffset = { a: s?.clock.a ?? null, b: s?.clock.b ?? null };
   const syncClocks = async () => {
     for (const x of sides) await peers[x].syncClock();
+    const jumped: string[] = [];
+    for (const x of sides) {
+      const now = peers[x].offset as number;
+      const was = lastOffset[x];
+      if (was !== null && Math.abs(now - was) > MAX_CLOCK_JUMP_MS) {
+        jumped.push(`the clock of ${domains[x]} moved ${Math.round((now - was) / 1000)} s between two reads: something else moved it (conformance?)`);
+      }
+      lastOffset[x] = now;
+    }
+    if (s !== null) s.clock = { ...lastOffset };
+    if (jumped.length > 0) {
+      s?.failures.push(...jumped);
+      save();
+      throw new SoakFailed(jumped.join('; '));
+    }
     const gap = Math.abs(peers.a.offset - peers.b.offset);
     if (gap > MAX_CLOCK_GAP_MS) throw new Refusal(`the staging servers' clocks are ${Math.round(gap / 1000)} s apart: run conformance (it puts them in step) first`);
   };
@@ -488,6 +553,8 @@ export async function runSoak(o: SoakOptions): Promise<number> {
       threads: [],
       alerts_at_start: [],
       restarts_unavailable: o.restartUnavailable,
+      clock: { ...lastOffset },
+      failures: [],
       counts: {},
     };
     for (const x of sides) for (const al of (await peers[x].alerts()) as Alert[]) fresh.alerts_at_start.push({ side: x, kind: al.kind, subject: al.subject });
@@ -521,7 +588,7 @@ export async function runSoak(o: SoakOptions): Promise<number> {
   const plan = (counterparty: string, thread_id?: string) => ({ template: 'plan@1', counterparty, ...(thread_id === undefined ? {} : { thread_id }) });
   const outcomeOf = (r: Json) => (r.status === 'rejected' && typeof r.code === 'string' ? `rejected_${r.code}` : String(r.status));
   const moved = (move: string, side: Side, thread_id: string, outcome: string) => {
-    count('moves', `move:${move}:${outcome}`);
+    count('moves', `move:${move}:${outcome}`, ...(outcome === 'applied' ? ['applied'] : []));
     o.log('move', { move, side, thread_id, outcome });
   };
 
@@ -578,22 +645,31 @@ export async function runSoak(o: SoakOptions): Promise<number> {
   };
 
   const samePair = (t: SoakState['threads'][number], p: SoakState['pairs'][number]) => (t.initiator === p.a && t.invitee === p.b) || (t.initiator === p.b && t.invitee === p.a);
-  const tick = async () => {
-    const pair = pick(s!.pairs);
-    const open = s!.threads.filter((t) => !t.done && samePair(t, pair));
-    if (open.length < MAX_OPEN_PER_PAIR && (open.length === 0 || random() < 0.25)) await propose(pair);
+  /** One move on a random pair that has one left to make; false when no pair has (every one at its cap, all ended). */
+  const tick = async (): Promise<boolean> => {
+    const state = s!;
+    const live = state.pairs
+      .map((pair) => {
+        const mine = state.threads.filter((t) => samePair(t, pair));
+        return { pair, open: mine.filter((t) => !t.done), full: mine.length >= MAX_PLAN_THREADS_PER_PAIR };
+      })
+      .filter((x) => !x.full || x.open.length > 0);
+    if (live.length === 0) return false;
+    const { pair, open, full } = pick(live);
+    if (!full && open.length < MAX_OPEN_PER_PAIR && (open.length === 0 || random() < PROPOSE_WHILE_OPEN)) await propose(pair);
     else await moveOn(pick(open));
+    return true;
   };
 
   // ---- faults
   let partition: { sides: Side[]; until: number } | null = null;
   let restarting: Promise<void> | null = null;
-  let restartFailures = 0;
   const heal = async () => {
     const p = partition!;
-    const left = [];
+    const left: Side[] = [];
     for (const x of p.sides) if (!(await resume(x))) left.push(x);
     partition = left.length === 0 ? null : { sides: left, until: Date.now() + MIN };
+    if (left.length === 0) count('partitions_healed');
     o.log('heal', { sides: p.sides.filter((x) => !left.includes(x)).join(',') });
   };
   const fault = async () => {
@@ -608,6 +684,7 @@ export async function runSoak(o: SoakOptions): Promise<number> {
           await peers[x].pause(true);
           done.push(x);
         } catch (e) {
+          count('errors', 'error:pause');
           o.log('error', { op: 'pause', side: x, code: errorCode(e) });
         }
       }
@@ -624,16 +701,16 @@ export async function runSoak(o: SoakOptions): Promise<number> {
     restarting = o
       .restart!(app)
       .then(() => {
-        restartFailures = 0;
-        count('restarts');
+        count('restarts', `restarted:${app}`);
         o.log('restarted', { app });
       })
       .catch((e: unknown) => {
-        restartFailures++;
         count('restart_failures');
         const code = errorCode(e);
         o.log('restart_failed', { app, code });
-        if ((e as Error)?.name === 'RestartRefused' || restartFailures >= 2) {
+        // Only a refusal (the token may not restart, no flyctl) stops restarts for good, and fails the verdict; anything
+        // else is tried again at a later fault.
+        if ((e as Error)?.name === 'RestartRefused') {
           s!.restarts_unavailable = code;
           o.log('restarts_disabled', { reason: code });
         }
@@ -644,8 +721,9 @@ export async function runSoak(o: SoakOptions): Promise<number> {
       });
   };
 
-  // ---- the verdict
-  const readViews = async () => {
+  // ---- reading both servers, and the verdict
+  const readViews = async (when: string) => {
+    const started = Date.now();
     const views: Record<string, Json[] | null> = {};
     for (const p of s!.people) {
       try {
@@ -655,6 +733,15 @@ export async function runSoak(o: SoakOptions): Promise<number> {
         views[p.address] = null;
       }
     }
+    const lists = Object.values(views);
+    o.log('state_read', {
+      when,
+      threads: lists.reduce((n, l) => n + (l?.length ?? 0), 0),
+      most_for_one_person: Math.max(0, ...lists.map((l) => l?.length ?? 0)),
+      unread: lists.filter((l) => l === null).length,
+      bytes: JSON.stringify(views).length,
+      ms: Date.now() - started,
+    });
     return views;
   };
   const verdict = async (): Promise<number> => {
@@ -663,15 +750,16 @@ export async function runSoak(o: SoakOptions): Promise<number> {
       o.print('soak: FAIL');
       return 1;
     }
-    for (const x of sides) await resume(x);
+    const problems: string[] = [];
+    for (const x of sides) if (!(await resume(x))) problems.push(`could not resume ${domains[x]}: it may still be cut off`);
     const until = Date.now() + T.quiesceMs;
-    let views = await readViews();
+    let views = await readViews('settling');
     for (;;) {
       const settling = judge(s, { domains, views, alerts: null });
       if (settling.problems.length === 0 || Date.now() >= until || o.stopped()) break;
       o.log('settling', { problems: settling.problems.length });
       await o.sleep(T.quiescePollMs);
-      views = await readViews();
+      views = await readViews('settling');
     }
     const alerts = { a: null as Alert[] | null, b: null as Alert[] | null };
     for (const x of sides) {
@@ -682,87 +770,108 @@ export async function runSoak(o: SoakOptions): Promise<number> {
       }
     }
     const v = judge(s, { domains, views, alerts });
-    if (s.restarts_unavailable !== null) v.notes.push(`no machine restarts after: ${s.restarts_unavailable}`);
+    problems.push(...s.failures, ...coverage(s, [apps.a, apps.b], o.minimums ?? MINIMUMS), ...v.problems);
     for (const n of v.notes) o.print(`NOTE ${n}`);
-    for (const p of v.problems) o.print(`FAIL ${p}`);
+    for (const p of problems) o.print(`FAIL ${p}`);
     const c = s.counts;
-    const what = `${v.threads} threads shared by the two servers; ${c.moves ?? 0} moves, ${c.faults ?? 0} faults (${c.restarts ?? 0} machine restarts), ${c.errors ?? 0} errors, since ${s.started_at}`;
-    o.print(v.problems.length === 0 ? `soak: PASS: ${what}; every thread identical on both, none stuck, no new alert` : `soak: FAIL: ${v.problems.length} problem(s); ${what}`);
-    return v.problems.length === 0 ? 0 : 1;
+    const what = `${v.threads} threads shared by the two servers; ${c.applied ?? 0} moves applied of ${c.moves ?? 0}, ${c.partitions_healed ?? 0} partitions, ${c.restarts ?? 0} machine restarts (${apps.a} ${c[`restarted:${apps.a}`] ?? 0}, ${apps.b} ${c[`restarted:${apps.b}`] ?? 0}), ${c.errors ?? 0} errors, since ${s.started_at}`;
+    o.print(problems.length === 0 ? `soak: PASS: ${what}; every thread identical on both, none stuck, no new alert` : `soak: FAIL: ${problems.length} problem(s); ${what}`);
+    return problems.length === 0 ? 0 : 1;
   };
 
   // ---- the run
+  // Told to stop (a cancelled job): resume both servers at once, before waiting for anything in flight.
+  o.onStop(() => {
+    o.log('stopping');
+    for (const x of sides) {
+      peers[x].pause(false).then(
+        () => o.log('resumed_on_stop', { side: x }),
+        (e: unknown) => o.log('error', { op: 'resume', side: x, code: errorCode(e) }),
+      );
+    }
+  });
   if (s === null && o.minutes === 0) return o.final ? verdict() : 0;
-  // A server may still be coming back from a restart the last slice made.
-  for (let i = 0; ; i++) {
-    try {
-      await syncClocks();
-      break;
-    } catch (e) {
-      if (e instanceof Refusal || i >= 5) throw e;
-      o.log('error', { op: 'clock', code: errorCode(e) });
-      await o.sleep(20_000);
-    }
-  }
-  for (const x of sides) await resume(x);
-  if (s === null && o.minutes > 0) {
-    s = await setUp();
-    o.log('set_up', { people: s.people.length, pairs: s.pairs.length });
-  } else if (s !== null) {
-    o.log('resumed', { people: s.people.length, pairs: s.pairs.length, threads: s.threads.length });
-  }
-  if (s !== null && o.restart === null && s.restarts_unavailable === null) s.restarts_unavailable = o.restartUnavailable ?? 'no restarter';
-  if (s?.restarts_unavailable) o.log('restarts_unavailable', { reason: s.restarts_unavailable });
-  if (s !== null && s.pairs.length === 0) {
-    o.log('no_pairs');
-    if (o.final) o.print('FAIL the soak set up no Connect pair');
-    return 1;
-  }
 
-  let stalled = false;
-  if (s !== null && o.minutes > 0) {
-    let nextFault = Date.now() + between(T.faultMs);
-    let lastSync = Date.now();
-    let lastAnswer = Date.now();
-    while (!o.stopped() && Date.now() < deadline) {
-      const now = Date.now();
+  let failed = false;
+  try {
+    // A server may still be coming back from a restart the last slice made.
+    for (let i = 0; ; i++) {
       try {
-        if (partition !== null && now >= partition.until) await heal();
-        if (partition === null && restarting === null && now >= nextFault && deadline - now > T.faultFreeTailMs) {
-          await fault();
-          nextFault = now + between(T.faultMs);
-        }
-        if (now - lastSync >= T.clockSyncMs) {
-          lastSync = now;
-          await syncClocks();
-        }
-        acting = null;
-        await tick();
-        lastAnswer = Date.now();
-      } catch (e) {
-        if (e instanceof Refusal) throw e;
-        const code = errorCode(e);
-        count('errors', `error:${code}`);
-        o.log('error', { op: 'move', code });
-        // An expired or revoked token: connect that agent again next time.
-        if ((e as { status?: unknown })?.status === 401 && acting !== null) agents.delete(acting);
-      }
-      save();
-      if (Date.now() - lastAnswer > T.stallMs) {
-        stalled = true;
-        o.log('stalled', { minutes: Math.round(T.stallMs / MIN) });
+        await syncClocks();
         break;
+      } catch (e) {
+        if (e instanceof Refusal || e instanceof SoakFailed || i >= 5) throw e;
+        o.log('error', { op: 'clock', code: errorCode(e) });
+        await o.sleep(20_000);
       }
-      await o.sleep(between([T.tickMs / 2, (T.tickMs * 3) / 2]));
     }
+    for (const x of sides) await resume(x);
+    if (s === null && o.minutes > 0) {
+      s = await setUp();
+      o.log('set_up', { people: s.people.length, pairs: s.pairs.length });
+    } else if (s !== null) {
+      o.log('resumed', { people: s.people.length, pairs: s.pairs.length, threads: s.threads.length });
+    }
+    if (s !== null && o.restart === null && s.restarts_unavailable === null) s.restarts_unavailable = o.restartUnavailable ?? 'no restarter';
+    if (s?.restarts_unavailable) o.log('restarts_unavailable', { reason: s.restarts_unavailable });
+    if (s !== null && s.pairs.length === 0 && !s.failures.includes('the soak set up no Connect pair')) s.failures.push('the soak set up no Connect pair');
+
+    if (s !== null && s.pairs.length > 0 && o.minutes > 0) {
+      let nextFault = Date.now() + between(T.faultMs);
+      let lastSync = Date.now();
+      let lastAnswer = Date.now();
+      let idle = false;
+      while (!o.stopped() && Date.now() < deadline) {
+        const now = Date.now();
+        try {
+          if (partition !== null && now >= partition.until) await heal();
+          if (partition === null && restarting === null && now >= nextFault && deadline - now > T.faultFreeTailMs) {
+            await fault();
+            nextFault = now + between(T.faultMs);
+          }
+          if (now - lastSync >= T.clockSyncMs) {
+            lastSync = now;
+            await syncClocks();
+          }
+          acting = null;
+          const moved = await tick();
+          if (!moved && !idle) o.log('every_pair_at_its_cap');
+          idle = !moved;
+          lastAnswer = Date.now();
+        } catch (e) {
+          if (e instanceof Refusal || e instanceof SoakFailed) throw e;
+          const code = errorCode(e);
+          count('errors', `error:${code}`);
+          o.log('error', { op: 'move', code });
+          // An expired or revoked token: connect that agent again next time.
+          if ((e as { status?: unknown })?.status === 401 && acting !== null) agents.delete(acting);
+        }
+        save();
+        if (Date.now() - lastAnswer > T.stallMs) {
+          failed = true;
+          s.failures.push(`no move was answered for ${Math.round(T.stallMs / MIN)} minutes (stalled)`);
+          o.log('stalled', { minutes: Math.round(T.stallMs / MIN) });
+          break;
+        }
+        await o.sleep(between([T.tickMs / 2, (T.tickMs * 3) / 2]));
+      }
+    }
+  } catch (e) {
+    if (!(e instanceof SoakFailed)) throw e;
+    failed = true;
+    o.log('failed', { reason: 'clock_moved' });
+  } finally {
     if (partition !== null) await heal();
     if (restarting !== null) await restarting;
     for (const x of sides) await resume(x);
     save();
-    o.log('run_end', { counts: s.counts });
   }
-  if (stalled) return 1;
-  return o.final ? verdict() : 0;
+  if (s !== null && o.minutes > 0) {
+    o.log('run_end', { counts: s.counts });
+    if (!o.final) await readViews('end_of_slice');
+  }
+  if (o.final) return verdict();
+  return failed || (s?.failures.length ?? 0) > 0 ? 1 : 0;
 }
 
 // ------------------------------------------------------------------ restarts, with flyctl and each app's deploy token
@@ -821,7 +930,7 @@ function flyRestarter(tokens: Record<StagingApp, string>): Restarter {
 
 // ------------------------------------------------------------------ the command line
 
-const USAGE = 'usage: soak.ts --parley <dir> --state <file> --minutes <n> [--new] [--final] [--a <origin>] [--b <origin>]';
+const USAGE = 'usage: soak.ts --parley <dir> --state <file> --minutes <n> [--new] [--final] [--a <origin>] [--b <origin>]\n       soak.ts --parley <dir> --release [--a <origin>] [--b <origin>]   (resume both servers, nothing else)';
 const KEY = /^([A-Za-z0-9._-]{1,64}):([A-Za-z0-9_-]{43})$/;
 
 interface Args {
@@ -830,6 +939,7 @@ interface Args {
   minutes: number;
   new: boolean;
   final: boolean;
+  release: boolean;
   a: string;
   b: string;
 }
@@ -840,7 +950,7 @@ function parseArgs(argv: string[]): Args | 'help' {
   const flags = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg === '--new' || arg === '--final') {
+    if (arg === '--new' || arg === '--final' || arg === '--release') {
       flags.add(arg);
       continue;
     }
@@ -849,16 +959,19 @@ function parseArgs(argv: string[]): Args | 'help' {
     if (value === undefined || value.startsWith('--') || one.has(arg)) throw new Refusal(`${arg} takes one value; ${USAGE}`);
     one.set(arg, value);
   }
-  const minutes = Number(one.get('--minutes'));
-  if (!one.has('--parley') || !one.has('--state') || !one.has('--minutes')) throw new Refusal(USAGE);
+  const release = flags.has('--release');
+  if (release && (flags.size > 1 || one.has('--state') || one.has('--minutes'))) throw new Refusal('--release takes only --parley (and --a, --b)');
+  const minutes = release ? 0 : Number(one.get('--minutes'));
+  if (!one.has('--parley') || (!release && (!one.has('--state') || !one.has('--minutes')))) throw new Refusal(USAGE);
   if (!Number.isInteger(minutes) || minutes < 0 || minutes > 360) throw new Refusal('--minutes is a whole number from 0 to 360');
   if (flags.has('--new') && minutes === 0) throw new Refusal('--new sets up a soak: give it --minutes');
   return {
     parley: one.get('--parley')!,
-    state: one.get('--state')!,
+    state: one.get('--state') ?? '',
     minutes,
     new: flags.has('--new'),
     final: flags.has('--final'),
+    release,
     a: one.get('--a') ?? STAGING['heygent-staging'].origin,
     b: one.get('--b') ?? STAGING['parley-peer-staging'].origin,
   };
@@ -888,7 +1001,9 @@ export async function main(argv: string[]): Promise<number> {
     b = stagingApp(args.b, '--b');
     if (a === b) throw new Refusal('--a and --b must be the two staging servers');
     const origins = { a: STAGING[a].origin, b: STAGING[b].origin };
-    if (existsSync(args.state)) {
+    if (args.release) {
+      // nothing to read
+    } else if (existsSync(args.state)) {
       if (args.new) throw new Refusal(`--new: ${args.state} exists already`);
       state = loadState(args.state, origins);
     } else if (!args.new && !args.final) throw new Refusal(`${args.state}: no soak to resume (--new sets one up)`);
@@ -897,7 +1012,7 @@ export async function main(argv: string[]): Promise<number> {
     return 2;
   }
   // Only --new sets a soak up: a final run with nothing to resume has its verdict already.
-  if (state === null && !args.new) {
+  if (state === null && !args.new && !args.release) {
     console.log('FAIL no soak state: the soak never set up, or its state was lost');
     console.log('soak: FAIL');
     return 1;
@@ -925,9 +1040,12 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   let stopping = false;
+  const stoppers: (() => void)[] = [];
   const sleepers = new Set<() => void>();
   const stop = () => {
+    if (stopping) return;
     stopping = true;
+    for (const fn of stoppers) fn();
     for (const wake of sleepers) wake();
   };
   process.once('SIGINT', stop);
@@ -943,7 +1061,31 @@ export async function main(argv: string[]): Promise<number> {
       const timer = setTimeout(wake, ms);
       sleepers.add(wake);
     });
-  const fetchWithTimeout: typeof fetch = (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
+  // A person's whole state (GET /test/v1/state, a few hundred threads read one by one) gets three minutes; the rest 30 s.
+  const fetchWithTimeout: typeof fetch = (input, init) =>
+    fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(String(input).includes('/test/v1/state?') ? 180_000 : 30_000) });
+  const log = (event: string, fields: Json = {}) => console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
+
+  if (args.release) {
+    const env = { fetch: fetchWithTimeout, defer: () => undefined };
+    let ok = true;
+    for (const [side, app, key] of [['a', a, keys[0]], ['b', b, keys[1]]] as const) {
+      const peer = new driver.Peer({ origin: STAGING[app].origin, key }, env);
+      let done = false;
+      for (let i = 0; i < 3 && !done; i++) {
+        try {
+          await peer.syncClock();
+          await peer.pause(false);
+          done = true;
+        } catch (e) {
+          log('error', { op: 'resume', side, code: errorCode(e) });
+        }
+      }
+      log(done ? 'resumed' : 'not_resumed', { side, app });
+      ok &&= done;
+    }
+    return ok ? 0 : 1;
+  }
 
   try {
     return await runSoak({
@@ -958,10 +1100,11 @@ export async function main(argv: string[]): Promise<number> {
       restart: restartUnavailable === null ? flyRestarter(tokens) : null,
       restartUnavailable,
       timing: TIMING,
-      log: (event, fields = {}) => console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields })),
+      log,
       print: (line) => console.log(line),
       sleep,
       stopped: () => stopping,
+      onStop: (fn) => stoppers.push(fn),
     });
   } catch (e) {
     if (e instanceof Refusal) console.error(`soak: ${e.message}`);

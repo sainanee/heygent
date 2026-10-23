@@ -12,7 +12,7 @@ Secret values never go in this repo, in chat, in an issue or in a log. They are 
 | `FLY_TOKEN_HEYGENT`, `FLY_TOKEN_HEYGENT_STAGING`, `FLY_TOKEN_PARLEY_PEER`, `FLY_TOKEN_PARLEY_PEER_STAGING` | GitHub, `fly` environment | `deploy.yml` (each app's own token); `conformance.yml` and `soak.yml` (the two staging ones) | A Fly deploy token for that one app. |
 | `CONFORMANCE_HEYGENT_STAGING_KEY` | GitHub, `fly` environment | `conformance.yml`, `soak.yml` | `heygent-conformance:<heygent-staging's test key>` |
 | `CONFORMANCE_PEER_STAGING_KEY` | GitHub, `fly` environment | `conformance.yml`, `soak.yml` | `heygent-conformance:<parley-peer-staging's test key>` |
-| `PARLEY_DEPLOY_KEY` | GitHub, `fly` environment | `conformance.yml` (checks out the pinned image's commit of the private sainanee/parley) | The private half of an ed25519 deploy key added read-only to sainanee/parley alone. |
+| `PARLEY_DEPLOY_KEY` | GitHub, `fly` environment | `conformance.yml` and `soak-slice.yml` (each checks out the pinned image's commit of the private sainanee/parley) | The private half of an ed25519 deploy key added read-only to sainanee/parley alone. |
 
 GitHub secrets live only in the `fly` environment, which only `main` may use (`deploy.md`, step 6); there are no repository-level secrets.
 

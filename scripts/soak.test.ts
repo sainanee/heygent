@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { errorCode, judge, loadState, saveState, stagingApp, type SoakState } from './soak.ts';
+import { MINIMUMS, TIMING, coverage, errorCode, judge, loadState, runSoak, saveState, stagingApp, type SoakState } from './soak.ts';
 
 const A = 'https://heygent-staging.fly.dev';
 const B = 'https://parley-peer-staging.fly.dev';
@@ -41,6 +41,8 @@ function state(over: Partial<SoakState> = {}): SoakState {
     threads: [{ thread_id: 'thr_1', initiator: ANN, invitee: BOB, applied: true, done: false }],
     alerts_at_start: [],
     restarts_unavailable: null,
+    clock: { a: 1_200, b: -300 },
+    failures: [],
     counts: { moves: 12, faults: 2 },
     ...over,
   };
@@ -270,4 +272,147 @@ test('the verdict fails on an alert raised during the soak, and only notes one t
   // Alerts that could not be read are not a pass.
   const unread = judge(state(), { domains: DOMAINS, views: views([connectView('requester'), planView('initiator')], [connectView('recipient'), planView('invitee')]), alerts: { a: [], b: null } });
   assert.deepEqual(unread.problems, ['could not read the open alerts on parley-peer-staging.fly.dev']);
+});
+
+// ------------------------------------------------------------------ what the soak must have done
+
+test('the verdict fails a soak that made no restarts, no partition, or too few moves', () => {
+  // Catches: a soak that "passes" without having tested anything: restarts refused or never completed for one app, a
+  // pause that always failed, a scenario that mostly errored.
+  const apps = ['heygent-staging', 'parley-peer-staging'];
+  const did = { applied: 2_500, partitions_healed: 30, 'restarted:heygent-staging': 9, 'restarted:parley-peer-staging': 11 };
+  assert.deepEqual(coverage(state({ counts: did }), apps), []);
+  assert.deepEqual(coverage(state({ counts: { ...did, 'restarted:parley-peer-staging': 0 } }), apps), ['0 machine restarts of parley-peer-staging completed; at least 1 expected']);
+  assert.deepEqual(coverage(state({ counts: { ...did, partitions_healed: 0, applied: 400 } }), apps), [
+    `only 400 moves were applied; a full soak applies at least ${MINIMUMS.applied}`,
+    '0 partitions were made and healed; at least 1 expected',
+  ]);
+  // A token flyctl refuses makes the run visibly incomplete, whatever else happened.
+  const refused = coverage(state({ restarts_unavailable: 'flyctl_not_permitted', counts: { ...did, 'restarted:heygent-staging': 0, 'restarted:parley-peer-staging': 0 } }), apps);
+  assert.equal(refused[0], "machine restarts are not possible with the apps' deploy tokens (flyctl_not_permitted)");
+  assert.equal(refused.length, 3);
+});
+
+// ------------------------------------------------------------------ the run, with a stand-in driver
+
+/** A stand-in for the conformance driver's Peer: it records the test-interface calls the soak makes. */
+function fakeDriver(hooks: { calls: string[]; offset?: (domain: string, n: number) => number; settled?: () => Promise<unknown> }) {
+  class Peer {
+    origin: string;
+    domain: string;
+    offset = 0;
+    syncs = 0;
+    constructor(spec: { origin: string }) {
+      this.origin = spec.origin;
+      this.domain = new URL(spec.origin).hostname;
+    }
+    async syncClock() {
+      this.offset = hooks.offset?.(this.domain, this.syncs++) ?? 0;
+    }
+    pause(on: boolean) {
+      hooks.calls.push(`${this.domain} pause ${on}`);
+      return Promise.resolve();
+    }
+    async alerts() {
+      return [];
+    }
+    async state() {
+      return { threads: [] };
+    }
+    async connectAgent() {
+      return { api: { prepare: async () => ({ status: 'prepared', thread_id: 'thr_new', role: 'initiator', state_version: 0, references: {}, legal_moves: ['propose'] }) } };
+    }
+  }
+  const flows = {
+    person: async () => assert.fail('no setup when resuming'),
+    connect: async () => assert.fail('no setup when resuming'),
+    moveFrom: async () => ({ status: 'applied' }),
+    settled: async (_p: unknown, answer: unknown) => (hooks.settled === undefined ? answer : hooks.settled()),
+    terms: () => ({}),
+  };
+  return { Peer, flows } as never;
+}
+
+function options(driver: never, over: Record<string, unknown> = {}) {
+  const lines: string[] = [];
+  let stopped = false;
+  const stoppers: (() => void)[] = [];
+  return {
+    lines,
+    stop: () => {
+      stopped = true;
+      for (const fn of stoppers) fn();
+    },
+    o: {
+      a: { app: 'heygent-staging' as const, origin: A, key: { label: 'x', key: Buffer.alloc(32) } },
+      b: { app: 'parley-peer-staging' as const, origin: B, key: { label: 'x', key: Buffer.alloc(32) } },
+      driver,
+      fetch: (() => assert.fail('no network')) as never,
+      statePath: tempFile('state.json'),
+      state: state({ threads: [] }),
+      minutes: 5,
+      final: false,
+      restart: null,
+      restartUnavailable: 'no tokens in this test',
+      timing: { ...TIMING, tickMs: 2, faultMs: [0, 0] as [number, number], partitionMs: [600_000, 600_000] as [number, number], faultFreeTailMs: 0, clockSyncMs: 0 },
+      log: () => undefined,
+      print: (line: string) => lines.push(line),
+      sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, Math.min(ms, 5))),
+      stopped: () => stopped,
+      onStop: (fn: () => void) => stoppers.push(fn),
+      random: () => 0.9,
+      ...over,
+    },
+  };
+}
+
+test('a soak told to stop mid-partition resumes both servers at once, before its move in flight finishes', async () => {
+  // Catches: a cancelled job leaving staging cut off (pause_outbound held in memory) because the soak waited on a hung
+  // request, or never got as far as its own clean-up.
+  const calls: string[] = [];
+  let release!: () => void;
+  let run!: ReturnType<typeof options>;
+  const driver = fakeDriver({
+    calls,
+    // The move hangs; the job is cancelled meanwhile.
+    settled: () => {
+      run.stop();
+      return new Promise((r) => (release = () => r({ status: 'applied' })));
+    },
+  });
+  run = options(driver);
+  const done = runSoak(run.o as never);
+  await new Promise((r) => setTimeout(r, 50));
+  // The partition (random 0.9 picks both sides) is in place, the move is hanging, and both are already resumed.
+  assert.deepEqual(calls.slice(-4), ['heygent-staging.fly.dev pause true', 'parley-peer-staging.fly.dev pause true', 'heygent-staging.fly.dev pause false', 'parley-peer-staging.fly.dev pause false']);
+  release();
+  assert.equal(await done, 0);
+  assert.equal(calls.at(-1), 'parley-peer-staging.fly.dev pause false');
+  assert.ok(!calls.slice(calls.lastIndexOf('parley-peer-staging.fly.dev pause true') + 1).some((c) => c.endsWith('true')));
+});
+
+test('a soak whose server clock is moved under it fails, naming the server, and says so in the verdict', async () => {
+  // Catches: conformance (which moves both clocks about 8 days) running during a soak unseen: offers would lapse, tokens
+  // expire, and a result still be reported.
+  const calls: string[] = [];
+  const driver = fakeDriver({ calls, offset: (domain, n) => (domain === 'parley-peer-staging.fly.dev' && n >= 2 ? 8 * 86_400_000 : 0) });
+  const run = options(driver, { final: true, timing: { ...TIMING, tickMs: 2, faultMs: [3_600_000, 3_600_000], clockSyncMs: 0, quiesceMs: 0 } });
+  assert.equal(await runSoak(run.o as never), 1);
+  assert.ok(run.lines.includes('FAIL the clock of parley-peer-staging.fly.dev moved 691200 s between two reads: something else moved it (conformance?)'), run.lines.join('\n'));
+  assert.match(run.lines.at(-1)!, /^soak: FAIL/);
+  // The failure is kept in the scenario, so a later slice's verdict still reports it.
+  assert.equal(JSON.parse(readFileSync(run.o.statePath, 'utf8')).failures.length, 1);
+});
+
+test('the verdict on real views: two servers that agree pass, a partition that kept a withdrawal from one side fails', () => {
+  // Recorded from two real Parley servers (fixtures/soak-views.json): Connect, then Plan threads agreed, declined,
+  // cancelled and open, each person's view from their own server. Catches: a comparison that real views never satisfy
+  // (a field that differs by seat, a timestamp each server writes itself), or one too loose to see a missed event.
+  const f = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures/soak-views.json'), 'utf8'));
+  const recorded = state({ a: `https://${f.domains.a}`, b: `https://${f.domains.b}`, people: f.people, pairs: f.pairs, threads: f.threads });
+  const converged = judge(recorded, { domains: f.domains, views: f.converged, alerts: noAlerts });
+  assert.deepEqual(converged.problems, []);
+  assert.equal(converged.threads, 6);
+  const diverged = judge(recorded, { domains: f.domains, views: f.diverged, alerts: noAlerts });
+  assert.deepEqual(diverged.problems, [`thread ${f.withdrawn_while_partitioned}: status withdrawn v2 on alpha.test, offered v1 on beta.test`]);
 });

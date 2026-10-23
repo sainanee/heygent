@@ -4,14 +4,15 @@ name: soak
 # moves for about a day while the servers are cut off from each other and their machines restarted at random; then the
 # verdict: no thread stuck, no new alert open, both servers showing every shared thread alike.
 #
-# GitHub ends a job after 6 hours, so the soak runs as four chained slices (soak-slice.yml) that hand the scenario on
-# as an artifact (people, threads, counts: no key or token). If a slice fails, the later ones do not trade moves, but
-# the fourth still runs the verdict on what the servers show, so every run ends with one; `verdict` then fails the run
-# if any slice did.
+# GitHub ends a job after 6 hours, so the soak runs as five chained slices (soak-slice.yml) that hand the scenario on
+# as an artifact (people, threads, counts: no key or token): 4 x 300 + 270 minutes, so moves are traded for over 24
+# hours. If a slice fails, the later ones do not trade moves, but the fifth still runs the verdict on what the servers
+# show, so every run ends with one; `verdict` then fails the run if any slice did.
 #
 # Runs only on main; the staging apps' Fly tokens and the conformance keys come from the `fly` GitHub Environment, which
-# only main may use. Don't merge a staging pin or run conformance while it runs: each slice checks that both apps still
-# run the digest the soak began on.
+# only main may use. Each slice and conformance.yml's run share the `staging` concurrency group, so neither starts while
+# the other runs; and each slice checks that both apps still run the digest the soak began on, and that nobody moved
+# their clocks (runbooks/soak.md says what that does and does not prevent).
 on:
   workflow_dispatch:
 
@@ -58,7 +59,7 @@ jobs:
     secrets: inherit
     with:
       slice: 1
-      minutes: 345
+      minutes: 300
       final: false
       digest: ${{ needs.pin.outputs.digest }}
       revision: ${{ needs.pin.outputs.revision }}
@@ -69,7 +70,7 @@ jobs:
     secrets: inherit
     with:
       slice: 2
-      minutes: 345
+      minutes: 300
       final: false
       digest: ${{ needs.pin.outputs.digest }}
       revision: ${{ needs.pin.outputs.revision }}
@@ -80,34 +81,45 @@ jobs:
     secrets: inherit
     with:
       slice: 3
-      minutes: 345
+      minutes: 300
+      final: false
+      digest: ${{ needs.pin.outputs.digest }}
+      revision: ${{ needs.pin.outputs.revision }}
+
+  slice-4:
+    needs: [pin, slice-3]
+    uses: ./.github/workflows/soak-slice.yml
+    secrets: inherit
+    with:
+      slice: 4
+      minutes: 300
       final: false
       digest: ${{ needs.pin.outputs.digest }}
       revision: ${{ needs.pin.outputs.revision }}
 
   # The last slice, then the verdict (up to 40 minutes for the servers to settle). After an earlier slice failed it trades
   # no moves (minutes 0) and only judges what the servers show. Not after a cancel: a cancelled soak has no verdict.
-  slice-4:
-    needs: [pin, slice-1, slice-2, slice-3]
+  slice-5:
+    needs: [pin, slice-1, slice-2, slice-3, slice-4]
     if: ${{ !cancelled() && needs.pin.result == 'success' }}
     uses: ./.github/workflows/soak-slice.yml
     secrets: inherit
     with:
-      slice: 4
-      minutes: ${{ needs.slice-3.result == 'success' && 300 || 0 }}
+      slice: 5
+      minutes: ${{ needs.slice-4.result == 'success' && 270 || 0 }}
       final: true
       digest: ${{ needs.pin.outputs.digest }}
       revision: ${{ needs.pin.outputs.revision }}
 
   verdict:
-    needs: [pin, slice-1, slice-2, slice-3, slice-4]
+    needs: [pin, slice-1, slice-2, slice-3, slice-4, slice-5]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: every slice and the verdict passed
         env:
-          RESULTS: pin=${{ needs.pin.result }} slice-1=${{ needs.slice-1.result }} slice-2=${{ needs.slice-2.result }} slice-3=${{ needs.slice-3.result }} slice-4=${{ needs.slice-4.result }}
+          RESULTS: pin=${{ needs.pin.result }} slice-1=${{ needs.slice-1.result }} slice-2=${{ needs.slice-2.result }} slice-3=${{ needs.slice-3.result }} slice-4=${{ needs.slice-4.result }} slice-5=${{ needs.slice-5.result }}
         run: |
           set -euo pipefail
           echo "$RESULTS"
