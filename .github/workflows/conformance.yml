@@ -30,6 +30,11 @@ jobs:
     environment: fly
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # Shared with each slice of soak.yml: conformance moves both staging clocks by days and pauses both servers, which
+    # would spoil a soak (and the soak's faults a conformance run). One waits for the other.
+    concurrency:
+      group: staging
+      cancel-in-progress: false
     outputs:
       digest: ${{ steps.pin.outputs.digest }}
       revision: ${{ steps.pin.outputs.revision }}

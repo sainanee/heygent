@@ -1,0 +1,1329 @@
+{
+ "recorded": "GET /test/v1/state of two in-process Parley servers (master 7b3493d), each person on their own server",
+ "domains": {
+  "a": "alpha.test",
+  "b": "beta.test"
+ },
+ "people": [
+  {
+   "address": "ann-0af74c@alpha.test",
+   "side": "a"
+  },
+  {
+   "address": "bob-f2f036@beta.test",
+   "side": "b"
+  }
+ ],
+ "pairs": [
+  {
+   "a": "ann-0af74c@alpha.test",
+   "b": "bob-f2f036@beta.test",
+   "connect_thread": "thr_dc34f684-0661-494c-93ae-ce10b18bf473"
+  }
+ ],
+ "threads": [
+  {
+   "thread_id": "thr_234ab5c2-2401-4b5b-b26d-f3c5bfc6d0b2",
+   "initiator": "ann-0af74c@alpha.test",
+   "invitee": "bob-f2f036@beta.test",
+   "applied": true,
+   "done": false
+  },
+  {
+   "thread_id": "thr_f4af7652-ba96-4fd1-a6e7-fe4f0964646a",
+   "initiator": "bob-f2f036@beta.test",
+   "invitee": "ann-0af74c@alpha.test",
+   "applied": true,
+   "done": false
+  },
+  {
+   "thread_id": "thr_e49dfff9-cc40-49ad-ad11-3fc49a4d35fc",
+   "initiator": "ann-0af74c@alpha.test",
+   "invitee": "bob-f2f036@beta.test",
+   "applied": true,
+   "done": false
+  },
+  {
+   "thread_id": "thr_f0a21ef6-f682-4c20-9f6d-2851c900c072",
+   "initiator": "bob-f2f036@beta.test",
+   "invitee": "ann-0af74c@alpha.test",
+   "applied": true,
+   "done": false
+  },
+  {
+   "thread_id": "thr_a2f96d8e-8178-4364-bd59-53307da0cbaf",
+   "initiator": "ann-0af74c@alpha.test",
+   "invitee": "bob-f2f036@beta.test",
+   "applied": true,
+   "done": false
+  }
+ ],
+ "withdrawn_while_partitioned": "thr_a2f96d8e-8178-4364-bd59-53307da0cbaf",
+ "converged": {
+  "ann-0af74c@alpha.test": [
+   {
+    "template": "connect@1",
+    "thread_id": "thr_dc34f684-0661-494c-93ae-ce10b18bf473",
+    "status": "connected",
+    "state_version": 2,
+    "you": "requester",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [
+     "disconnect"
+    ],
+    "move_descriptions": [
+     {
+      "move": "disconnect",
+      "actor": "either participant",
+      "nod": true,
+      "covers": "ending the connection",
+      "transition": "connected → disconnected",
+      "carries": "nothing",
+      "refers_to": "nothing"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "request",
+      "by": "you",
+      "at": "2026-10-23T10:38:02.606Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "accept",
+      "by": "them",
+      "at": "2026-10-23T10:38:03.128Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null,
+    "wants": [
+     "plan@1"
+    ],
+    "request": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_234ab5c2-2401-4b5b-b26d-f3c5bfc6d0b2",
+    "status": "agreed",
+    "state_version": 3,
+    "you": "initiator",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [
+     "cancel"
+    ],
+    "move_descriptions": [
+     {
+      "move": "cancel",
+      "actor": "either participant",
+      "nod": true,
+      "covers": "cancelling the agreed plan",
+      "transition": "agreed → cancelled",
+      "carries": "nothing",
+      "refers_to": "agreed_plan"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:03.486Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "counter",
+      "by": "them",
+      "at": "2026-10-23T10:38:03.952Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "accept",
+      "by": "you",
+      "at": "2026-10-23T10:38:04.254Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": {
+     "offer_command_id": "cmd_1ba0ec31-285a-4dca-8949-01222ca0920a",
+     "slot": {
+      "start": "2026-10-24T10:45:00Z",
+      "duration_min": 60
+     },
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     }
+    }
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_f4af7652-ba96-4fd1-a6e7-fe4f0964646a",
+    "status": "declined",
+    "state_version": 3,
+    "you": "invitee",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:04.696Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "counter",
+      "by": "you",
+      "at": "2026-10-23T10:38:05.092Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "decline",
+      "by": "them",
+      "at": "2026-10-23T10:38:05.428Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_e49dfff9-cc40-49ad-ad11-3fc49a4d35fc",
+    "status": "cancelled",
+    "state_version": 3,
+    "you": "initiator",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:05.782Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "accept",
+      "by": "them",
+      "at": "2026-10-23T10:38:06.047Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "cancel",
+      "by": "them",
+      "at": "2026-10-23T10:38:06.393Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": {
+     "offer_command_id": "cmd_6a2411cf-ed85-472f-abc5-725808b0e357",
+     "slot": {
+      "start": "2026-10-24T10:45:00Z",
+      "duration_min": 60
+     },
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     }
+    }
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_f0a21ef6-f682-4c20-9f6d-2851c900c072",
+    "status": "offered",
+    "state_version": 1,
+    "you": "invitee",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [
+     "counter",
+     "accept",
+     "decline"
+    ],
+    "move_descriptions": [
+     {
+      "move": "counter",
+      "actor": "non-maker of the current offer",
+      "nod": true,
+      "covers": "agreeing to any of the offered slots under these terms",
+      "transition": "offered → offered (flips which side is offering)",
+      "carries": "all_terms",
+      "refers_to": "current_offer"
+     },
+     {
+      "move": "accept",
+      "actor": "non-maker of the current offer",
+      "nod": true,
+      "covers": "agreeing to the chosen slot of the current offer under its terms",
+      "transition": "offered → agreed",
+      "carries": "one_slot",
+      "refers_to": "current_offer"
+     },
+     {
+      "move": "decline",
+      "actor": "non-maker of the current offer",
+      "nod": false,
+      "covers": null,
+      "transition": "offered → declined",
+      "carries": "nothing",
+      "refers_to": "current_offer"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:06.606Z"
+     }
+    ],
+    "open_offer": {
+     "command_id": "cmd_8653fa51-1c86-4cf8-9c7b-f1bcf172491c",
+     "maker": "initiator",
+     "by": "them",
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     },
+     "expires_at": "2026-10-24T09:45:00.000Z"
+    },
+    "agreed": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_a2f96d8e-8178-4364-bd59-53307da0cbaf",
+    "status": "offered",
+    "state_version": 1,
+    "you": "initiator",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [
+     "withdraw"
+    ],
+    "move_descriptions": [
+     {
+      "move": "withdraw",
+      "actor": "maker of the current offer",
+      "nod": false,
+      "covers": null,
+      "transition": "offered → withdrawn",
+      "carries": "nothing",
+      "refers_to": "current_offer"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:06.849Z"
+     }
+    ],
+    "open_offer": {
+     "command_id": "cmd_39b23cd6-aca9-441d-9a80-753ff9fb7690",
+     "maker": "initiator",
+     "by": "you",
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     },
+     "expires_at": "2026-10-24T09:45:00.000Z"
+    },
+    "agreed": null
+   }
+  ],
+  "bob-f2f036@beta.test": [
+   {
+    "template": "connect@1",
+    "thread_id": "thr_dc34f684-0661-494c-93ae-ce10b18bf473",
+    "status": "connected",
+    "state_version": 2,
+    "you": "recipient",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [
+     "disconnect"
+    ],
+    "move_descriptions": [
+     {
+      "move": "disconnect",
+      "actor": "either participant",
+      "nod": true,
+      "covers": "ending the connection",
+      "transition": "connected → disconnected",
+      "carries": "nothing",
+      "refers_to": "nothing"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "request",
+      "by": "them",
+      "at": "2026-10-23T10:38:02.606Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "accept",
+      "by": "you",
+      "at": "2026-10-23T10:38:03.128Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null,
+    "wants": [
+     "plan@1"
+    ],
+    "request": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_234ab5c2-2401-4b5b-b26d-f3c5bfc6d0b2",
+    "status": "agreed",
+    "state_version": 3,
+    "you": "invitee",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [
+     "cancel"
+    ],
+    "move_descriptions": [
+     {
+      "move": "cancel",
+      "actor": "either participant",
+      "nod": true,
+      "covers": "cancelling the agreed plan",
+      "transition": "agreed → cancelled",
+      "carries": "nothing",
+      "refers_to": "agreed_plan"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:03.486Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "counter",
+      "by": "you",
+      "at": "2026-10-23T10:38:03.952Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "accept",
+      "by": "them",
+      "at": "2026-10-23T10:38:04.254Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": {
+     "offer_command_id": "cmd_1ba0ec31-285a-4dca-8949-01222ca0920a",
+     "slot": {
+      "start": "2026-10-24T10:45:00Z",
+      "duration_min": 60
+     },
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     }
+    }
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_f4af7652-ba96-4fd1-a6e7-fe4f0964646a",
+    "status": "declined",
+    "state_version": 3,
+    "you": "initiator",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:04.696Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "counter",
+      "by": "them",
+      "at": "2026-10-23T10:38:05.092Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "decline",
+      "by": "you",
+      "at": "2026-10-23T10:38:05.428Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_e49dfff9-cc40-49ad-ad11-3fc49a4d35fc",
+    "status": "cancelled",
+    "state_version": 3,
+    "you": "invitee",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:05.782Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "accept",
+      "by": "you",
+      "at": "2026-10-23T10:38:06.047Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "cancel",
+      "by": "you",
+      "at": "2026-10-23T10:38:06.393Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": {
+     "offer_command_id": "cmd_6a2411cf-ed85-472f-abc5-725808b0e357",
+     "slot": {
+      "start": "2026-10-24T10:45:00Z",
+      "duration_min": 60
+     },
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     }
+    }
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_f0a21ef6-f682-4c20-9f6d-2851c900c072",
+    "status": "offered",
+    "state_version": 1,
+    "you": "initiator",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [
+     "withdraw"
+    ],
+    "move_descriptions": [
+     {
+      "move": "withdraw",
+      "actor": "maker of the current offer",
+      "nod": false,
+      "covers": null,
+      "transition": "offered → withdrawn",
+      "carries": "nothing",
+      "refers_to": "current_offer"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:06.606Z"
+     }
+    ],
+    "open_offer": {
+     "command_id": "cmd_8653fa51-1c86-4cf8-9c7b-f1bcf172491c",
+     "maker": "initiator",
+     "by": "you",
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     },
+     "expires_at": "2026-10-24T09:45:00.000Z"
+    },
+    "agreed": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_a2f96d8e-8178-4364-bd59-53307da0cbaf",
+    "status": "offered",
+    "state_version": 1,
+    "you": "invitee",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [
+     "counter",
+     "accept",
+     "decline"
+    ],
+    "move_descriptions": [
+     {
+      "move": "counter",
+      "actor": "non-maker of the current offer",
+      "nod": true,
+      "covers": "agreeing to any of the offered slots under these terms",
+      "transition": "offered → offered (flips which side is offering)",
+      "carries": "all_terms",
+      "refers_to": "current_offer"
+     },
+     {
+      "move": "accept",
+      "actor": "non-maker of the current offer",
+      "nod": true,
+      "covers": "agreeing to the chosen slot of the current offer under its terms",
+      "transition": "offered → agreed",
+      "carries": "one_slot",
+      "refers_to": "current_offer"
+     },
+     {
+      "move": "decline",
+      "actor": "non-maker of the current offer",
+      "nod": false,
+      "covers": null,
+      "transition": "offered → declined",
+      "carries": "nothing",
+      "refers_to": "current_offer"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:06.849Z"
+     }
+    ],
+    "open_offer": {
+     "command_id": "cmd_39b23cd6-aca9-441d-9a80-753ff9fb7690",
+     "maker": "initiator",
+     "by": "them",
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     },
+     "expires_at": "2026-10-24T09:45:00.000Z"
+    },
+    "agreed": null
+   }
+  ]
+ },
+ "diverged": {
+  "ann-0af74c@alpha.test": [
+   {
+    "template": "connect@1",
+    "thread_id": "thr_dc34f684-0661-494c-93ae-ce10b18bf473",
+    "status": "connected",
+    "state_version": 2,
+    "you": "requester",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [
+     "disconnect"
+    ],
+    "move_descriptions": [
+     {
+      "move": "disconnect",
+      "actor": "either participant",
+      "nod": true,
+      "covers": "ending the connection",
+      "transition": "connected → disconnected",
+      "carries": "nothing",
+      "refers_to": "nothing"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "request",
+      "by": "you",
+      "at": "2026-10-23T10:38:02.606Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "accept",
+      "by": "them",
+      "at": "2026-10-23T10:38:03.128Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null,
+    "wants": [
+     "plan@1"
+    ],
+    "request": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_234ab5c2-2401-4b5b-b26d-f3c5bfc6d0b2",
+    "status": "agreed",
+    "state_version": 3,
+    "you": "initiator",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [
+     "cancel"
+    ],
+    "move_descriptions": [
+     {
+      "move": "cancel",
+      "actor": "either participant",
+      "nod": true,
+      "covers": "cancelling the agreed plan",
+      "transition": "agreed → cancelled",
+      "carries": "nothing",
+      "refers_to": "agreed_plan"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:03.486Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "counter",
+      "by": "them",
+      "at": "2026-10-23T10:38:03.952Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "accept",
+      "by": "you",
+      "at": "2026-10-23T10:38:04.254Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": {
+     "offer_command_id": "cmd_1ba0ec31-285a-4dca-8949-01222ca0920a",
+     "slot": {
+      "start": "2026-10-24T10:45:00Z",
+      "duration_min": 60
+     },
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     }
+    }
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_f4af7652-ba96-4fd1-a6e7-fe4f0964646a",
+    "status": "declined",
+    "state_version": 3,
+    "you": "invitee",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:04.696Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "counter",
+      "by": "you",
+      "at": "2026-10-23T10:38:05.092Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "decline",
+      "by": "them",
+      "at": "2026-10-23T10:38:05.428Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_e49dfff9-cc40-49ad-ad11-3fc49a4d35fc",
+    "status": "cancelled",
+    "state_version": 3,
+    "you": "initiator",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:05.782Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "accept",
+      "by": "them",
+      "at": "2026-10-23T10:38:06.047Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "cancel",
+      "by": "them",
+      "at": "2026-10-23T10:38:06.393Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": {
+     "offer_command_id": "cmd_6a2411cf-ed85-472f-abc5-725808b0e357",
+     "slot": {
+      "start": "2026-10-24T10:45:00Z",
+      "duration_min": 60
+     },
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     }
+    }
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_f0a21ef6-f682-4c20-9f6d-2851c900c072",
+    "status": "offered",
+    "state_version": 1,
+    "you": "invitee",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [
+     "counter",
+     "accept",
+     "decline"
+    ],
+    "move_descriptions": [
+     {
+      "move": "counter",
+      "actor": "non-maker of the current offer",
+      "nod": true,
+      "covers": "agreeing to any of the offered slots under these terms",
+      "transition": "offered → offered (flips which side is offering)",
+      "carries": "all_terms",
+      "refers_to": "current_offer"
+     },
+     {
+      "move": "accept",
+      "actor": "non-maker of the current offer",
+      "nod": true,
+      "covers": "agreeing to the chosen slot of the current offer under its terms",
+      "transition": "offered → agreed",
+      "carries": "one_slot",
+      "refers_to": "current_offer"
+     },
+     {
+      "move": "decline",
+      "actor": "non-maker of the current offer",
+      "nod": false,
+      "covers": null,
+      "transition": "offered → declined",
+      "carries": "nothing",
+      "refers_to": "current_offer"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:06.606Z"
+     }
+    ],
+    "open_offer": {
+     "command_id": "cmd_8653fa51-1c86-4cf8-9c7b-f1bcf172491c",
+     "maker": "initiator",
+     "by": "them",
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     },
+     "expires_at": "2026-10-24T09:45:00.000Z"
+    },
+    "agreed": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_a2f96d8e-8178-4364-bd59-53307da0cbaf",
+    "status": "withdrawn",
+    "state_version": 2,
+    "you": "initiator",
+    "counterparty": "bob-f2f036@beta.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:06.849Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "withdraw",
+      "by": "you",
+      "at": "2026-10-23T10:38:08.717Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null
+   }
+  ],
+  "bob-f2f036@beta.test": [
+   {
+    "template": "connect@1",
+    "thread_id": "thr_dc34f684-0661-494c-93ae-ce10b18bf473",
+    "status": "connected",
+    "state_version": 2,
+    "you": "recipient",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [
+     "disconnect"
+    ],
+    "move_descriptions": [
+     {
+      "move": "disconnect",
+      "actor": "either participant",
+      "nod": true,
+      "covers": "ending the connection",
+      "transition": "connected → disconnected",
+      "carries": "nothing",
+      "refers_to": "nothing"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "request",
+      "by": "them",
+      "at": "2026-10-23T10:38:02.606Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "accept",
+      "by": "you",
+      "at": "2026-10-23T10:38:03.128Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null,
+    "wants": [
+     "plan@1"
+    ],
+    "request": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_234ab5c2-2401-4b5b-b26d-f3c5bfc6d0b2",
+    "status": "agreed",
+    "state_version": 3,
+    "you": "invitee",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [
+     "cancel"
+    ],
+    "move_descriptions": [
+     {
+      "move": "cancel",
+      "actor": "either participant",
+      "nod": true,
+      "covers": "cancelling the agreed plan",
+      "transition": "agreed → cancelled",
+      "carries": "nothing",
+      "refers_to": "agreed_plan"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:03.486Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "counter",
+      "by": "you",
+      "at": "2026-10-23T10:38:03.952Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "accept",
+      "by": "them",
+      "at": "2026-10-23T10:38:04.254Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": {
+     "offer_command_id": "cmd_1ba0ec31-285a-4dca-8949-01222ca0920a",
+     "slot": {
+      "start": "2026-10-24T10:45:00Z",
+      "duration_min": 60
+     },
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     }
+    }
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_f4af7652-ba96-4fd1-a6e7-fe4f0964646a",
+    "status": "declined",
+    "state_version": 3,
+    "you": "initiator",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:04.696Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "counter",
+      "by": "them",
+      "at": "2026-10-23T10:38:05.092Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "decline",
+      "by": "you",
+      "at": "2026-10-23T10:38:05.428Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_e49dfff9-cc40-49ad-ad11-3fc49a4d35fc",
+    "status": "cancelled",
+    "state_version": 3,
+    "you": "invitee",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [],
+    "move_descriptions": [],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:05.782Z"
+     },
+     {
+      "seq": 2,
+      "kind": "move",
+      "move": "accept",
+      "by": "you",
+      "at": "2026-10-23T10:38:06.047Z"
+     },
+     {
+      "seq": 3,
+      "kind": "move",
+      "move": "cancel",
+      "by": "you",
+      "at": "2026-10-23T10:38:06.393Z"
+     }
+    ],
+    "open_offer": null,
+    "agreed": {
+     "offer_command_id": "cmd_6a2411cf-ed85-472f-abc5-725808b0e357",
+     "slot": {
+      "start": "2026-10-24T10:45:00Z",
+      "duration_min": 60
+     },
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     }
+    }
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_f0a21ef6-f682-4c20-9f6d-2851c900c072",
+    "status": "offered",
+    "state_version": 1,
+    "you": "initiator",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [
+     "withdraw"
+    ],
+    "move_descriptions": [
+     {
+      "move": "withdraw",
+      "actor": "maker of the current offer",
+      "nod": false,
+      "covers": null,
+      "transition": "offered → withdrawn",
+      "carries": "nothing",
+      "refers_to": "current_offer"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "you",
+      "at": "2026-10-23T10:38:06.606Z"
+     }
+    ],
+    "open_offer": {
+     "command_id": "cmd_8653fa51-1c86-4cf8-9c7b-f1bcf172491c",
+     "maker": "initiator",
+     "by": "you",
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     },
+     "expires_at": "2026-10-24T09:45:00.000Z"
+    },
+    "agreed": null
+   },
+   {
+    "template": "plan@1",
+    "thread_id": "thr_a2f96d8e-8178-4364-bd59-53307da0cbaf",
+    "status": "offered",
+    "state_version": 1,
+    "you": "invitee",
+    "counterparty": "ann-0af74c@alpha.test",
+    "pending_action": null,
+    "legal_moves": [
+     "counter",
+     "accept",
+     "decline"
+    ],
+    "move_descriptions": [
+     {
+      "move": "counter",
+      "actor": "non-maker of the current offer",
+      "nod": true,
+      "covers": "agreeing to any of the offered slots under these terms",
+      "transition": "offered → offered (flips which side is offering)",
+      "carries": "all_terms",
+      "refers_to": "current_offer"
+     },
+     {
+      "move": "accept",
+      "actor": "non-maker of the current offer",
+      "nod": true,
+      "covers": "agreeing to the chosen slot of the current offer under its terms",
+      "transition": "offered → agreed",
+      "carries": "one_slot",
+      "refers_to": "current_offer"
+     },
+     {
+      "move": "decline",
+      "actor": "non-maker of the current offer",
+      "nod": false,
+      "covers": null,
+      "transition": "offered → declined",
+      "carries": "nothing",
+      "refers_to": "current_offer"
+     }
+    ],
+    "history": [
+     {
+      "seq": 1,
+      "kind": "move",
+      "move": "propose",
+      "by": "them",
+      "at": "2026-10-23T10:38:06.849Z"
+     }
+    ],
+    "open_offer": {
+     "command_id": "cmd_39b23cd6-aca9-441d-9a80-753ff9fb7690",
+     "maker": "initiator",
+     "by": "them",
+     "terms": {
+      "kind": "coffee",
+      "slots": [
+       {
+        "start": "2026-10-24T10:45:00Z",
+        "duration_min": 60
+       }
+      ],
+      "place": "none",
+      "price_cap_per_person": "none"
+     },
+     "expires_at": "2026-10-24T09:45:00.000Z"
+    },
+    "agreed": null
+   }
+  ]
+ }
+}

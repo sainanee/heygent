@@ -1,0 +1,161 @@
+name: soak-slice
+
+# One slice of the soak, called five times by soak.yml (never run alone): checks both staging apps run the soak's digest
+# on one started machine, runs scripts/soak.ts for `minutes` (resuming the scenario an earlier slice left as an artifact;
+# slice 1 sets one up), checks the digest again, and leaves the scenario for the next slice. With `final`, scripts/soak.ts
+# then lets the servers settle and gives the verdict (runbooks/soak.md).
+#
+# What it does to staging: new test accounts and threads; pauses (pause_outbound, always resumed) and machine restarts.
+# It never moves the servers' clocks. The scenario artifact holds addresses, thread ids and counts only: the agents'
+# tokens are never written down (each slice connects its agents again), and the keys stay in the environment.
+on:
+  workflow_call:
+    inputs:
+      slice:
+        type: number
+        required: true
+      minutes:
+        type: number
+        required: true
+      final:
+        type: boolean
+        required: true
+      digest:
+        type: string
+        required: true
+      revision:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  A_APP: heygent-staging
+  B_APP: parley-peer-staging
+
+jobs:
+  run:
+    if: github.ref == 'refs/heads/main'
+    environment: fly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    # Shared with conformance.yml's run: a soak slice and a conformance run never touch staging at once (conformance
+    # moves both clocks by days and pauses and resumes both servers).
+    concurrency:
+      group: staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # 1.5
+        with:
+          version: 0.4.51
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: sainanee/parley
+          ref: ${{ inputs.revision }}
+          path: parley
+          # sainanee/parley is private: a read-only deploy key on that repo alone (runbooks/secrets.md).
+          ssh-key: ${{ secrets.PARLEY_DEPLOY_KEY }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: install the conformance driver
+        working-directory: parley
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --filter '@parley/conformance...'
+
+      - name: the scenario so far
+        if: inputs.slice > 1
+        # Nothing to download (slice 1 failed before it wrote one) is not this step's failure: a slice that must resume
+        # refuses without a scenario, and the last one judges its absence as a FAIL.
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: soak-state-*
+          path: ${{ runner.temp }}/soak-artifacts
+      - name: pick the latest slice's scenario
+        env:
+          SLICE: ${{ inputs.slice }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/soak"
+          latest=""
+          n=1
+          while [ "$n" -lt "$SLICE" ]; do
+            f="$RUNNER_TEMP/soak-artifacts/soak-state-$n/state.json"
+            if [ -f "$f" ]; then latest="$f"; fi
+            n=$((n + 1))
+          done
+          if [ -n "$latest" ]; then cp "$latest" "$RUNNER_TEMP/soak/state.json"; echo "resuming from ${latest#"$RUNNER_TEMP"/}"
+          else echo "no earlier scenario"; fi
+
+      - name: soak
+        env:
+          FLY_TOKEN_HEYGENT_STAGING: ${{ secrets.FLY_TOKEN_HEYGENT_STAGING }}
+          FLY_TOKEN_PARLEY_PEER_STAGING: ${{ secrets.FLY_TOKEN_PARLEY_PEER_STAGING }}
+          CONFORMANCE_HEYGENT_STAGING_KEY: ${{ secrets.CONFORMANCE_HEYGENT_STAGING_KEY }}
+          CONFORMANCE_PEER_STAGING_KEY: ${{ secrets.CONFORMANCE_PEER_STAGING_KEY }}
+          DIGEST: ${{ inputs.digest }}
+          SLICE: ${{ inputs.slice }}
+          MINUTES: ${{ inputs.minutes }}
+          FINAL: ${{ inputs.final }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bad digest" >&2; exit 1; }
+          token_of() { local v; v="FLY_TOKEN_$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; printf '%s' "${!v:-}"; }
+          # Each staging app runs the soak's digest on exactly one started machine, before and after the slice: a
+          # staging deploy in between would make the result belong to no one image.
+          running() {
+            for app in "$A_APP" "$B_APP"; do
+              machines="$(FLY_API_TOKEN="$(token_of "$app")" flyctl machine list --app "$app" --json)"
+              echo "$machines" | jq -r --arg app "$app" '.[] | "\($app): machine \(.id) \(.state) \(.image_ref.digest)"'
+              echo "$machines" | jq -e --arg d "$DIGEST" 'length == 1 and .[0].state == "started" and .[0].image_ref.digest == $d' >/dev/null ||
+                { echo "$app is not running exactly one started machine on $DIGEST" >&2; return 1; }
+            done
+          }
+          running
+
+          flags=(--minutes "$MINUTES")
+          if [ "$SLICE" = 1 ]; then flags+=(--new); fi
+          if [ "$FINAL" = true ]; then flags+=(--final); fi
+          # The keys and Fly tokens reach the soak through its environment only, never argv. Unlike conformance.yml, which
+          # keeps the Fly tokens from the suite (`export -n`), the soak needs them, for `fly machine restart`: it reads
+          # them and deletes them from its own process.env before it loads the Parley driver, and hands each one to
+          # flyctl alone (an environment of PATH, HOME and that token).
+          set +e
+          node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/soak.ts \
+            --parley parley --state "$RUNNER_TEMP/soak/state.json" "${flags[@]}" | tee "$RUNNER_TEMP/soak.log"
+          code="${PIPESTATUS[0]}"
+          set -e
+
+          running || code=1
+          {
+            echo "### Soak, slice $SLICE: exit $code"
+            echo
+            echo '```'
+            grep -E '^(NOTE|FAIL|soak:) ' "$RUNNER_TEMP/soak.log" || true
+            grep -E '"event":"(set_up|resumed|run_end|stalled|aborted|restarts_unavailable|restarts_disabled)"' "$RUNNER_TEMP/soak.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+      - name: on a cancel, resume both servers (in case the soak was stopped before it could)
+        if: cancelled()
+        env:
+          CONFORMANCE_HEYGENT_STAGING_KEY: ${{ secrets.CONFORMANCE_HEYGENT_STAGING_KEY }}
+          CONFORMANCE_PEER_STAGING_KEY: ${{ secrets.CONFORMANCE_PEER_STAGING_KEY }}
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/soak.ts --parley parley --release
+
+      - name: leave the scenario for the next slice
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: soak-state-${{ inputs.slice }}
+          path: ${{ runner.temp }}/soak/state.json
+          if-no-files-found: warn
+          retention-days: 14
