@@ -77,6 +77,17 @@ for name in $names; do
         die "DATABASE_URL must carry sslmode=verify-full; nothing was set"
       printf '%s' "$answer" | grep -Eq '[?&]sslrootcert=/etc/parley/supabase-ca\.crt(&|$)' ||
         die "DATABASE_URL must carry sslrootcert=$CA_PATH; nothing was set"
+      # Parsed as a URL (on stdin, never argv; only a verdict comes back): a password with an unencoded # / ? ends the
+      # host early, and Postgres's client then connects somewhere else (often localhost: the server's start fails with
+      # ECONNREFUSED). The host must be a Supabase database: db.<ref>.supabase.co, or the session pooler.
+      command -v node >/dev/null || die "checking DATABASE_URL needs node on PATH; nothing was set"
+      printf '%s' "$answer" | node -e '
+        let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+          let u; try { u = new URL(s); } catch { process.exit(1); }
+          const host = /^db\.[a-z0-9]{20}\.supabase\.co$/.test(u.hostname) || /^aws-[0-9]+-[a-z0-9-]+\.pooler\.supabase\.com$/.test(u.hostname);
+          process.exit(/^postgres(ql)?:$/.test(u.protocol) && host && u.port === "5432" && u.username !== "" && u.password !== "" && u.pathname === "/postgres" ? 0 : 1);
+        });' ||
+        die "DATABASE_URL must parse to a Supabase database host (db.<ref>.supabase.co or the session pooler) with a user, a password and /postgres: percent-encode any @ : / ? # % & in the password; nothing was set"
       value="$answer"
       ;;
     PARLEY_SECRET_KEY)

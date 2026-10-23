@@ -71,3 +71,23 @@ test('set-secrets refuses an app name that is not one line of lowercase letters,
   assert.match(r.stderr, /an app name is lowercase letters, digits and hyphens/);
   assert.equal(s.flyCalled(), false);
 });
+
+test('set-secrets refuses a DATABASE_URL that does not parse to a Supabase database host, and accepts an encoded password', async () => {
+  // An unencoded # / ? in the password ends the authority early: Postgres's client then connects somewhere else
+  // (often localhost), and the server fails to start with ECONNREFUSED.
+  const direct = (pw: string) =>
+    `postgresql://postgres:${pw}@db.abcdefghijklmnopqrst.supabase.co:5432/postgres?sslmode=verify-full&sslrootcert=/etc/parley/supabase-ca.crt`;
+  for (const url of [direct('pw#not-on-argv'), direct('pw/not-on-argv'), direct('pw?not-on-argv'), DB.replace('aws-0-ap-southeast-1.pooler.supabase.com', 'localhost')]) {
+    const s = setup();
+    const r = await s.run(['heygent', 'DATABASE_URL'], `${url}\n`);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /DATABASE_URL must/);
+    assert.ok(!r.stderr.includes('not-on-argv') && !r.stdout.includes('not-on-argv'));
+    assert.equal(s.flyCalled(), false);
+  }
+  const s = setup();
+  const ok = direct('pw%23not-on-argv');
+  const r = await s.run(['heygent', 'DATABASE_URL'], `${ok}\n`);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(s.stdin().includes(ok));
+});
