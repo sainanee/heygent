@@ -29,6 +29,8 @@ It reads each value with hidden input, checks its form without printing it, and 
 
 `DATABASE_URL`: build it from the Supabase project's Connect dialog and your saved password (`deploy.md`, step 4), and paste it into the prompt.
 
+**Before deploying with a new `DATABASE_URL`**, check that it logs in, from Fly, with the app's stored value: `scripts/check-database-login.sh <app>`. It prints `ok`, or an error code: `28P01` is a wrong password. Check now rather than at deploy: a server whose login fails retries, Supabase then bans the machine's address (Database settings → Network bans), and from then on the deploy reads only `ECONNREFUSED`, which hides the cause. If that has happened, fix the password, then **Unban IP** there, then deploy.
+
 `PARLEY_SECRET_KEY`: make one per app with `openssl rand -base64 32`, keep it in your password manager, and paste it into the prompt. Never change it casually: people's recovery codes and stored agent webhooks stop working under a new key.
 
 `PARLEY_TEST_KEYS` and its GitHub twin, without the key ever being shown (run from the repo root; once per staging app):
