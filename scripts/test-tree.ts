@@ -66,6 +66,9 @@ export function runShell(
     child.stdout.on('data', (d) => (stdout += d));
     child.stderr.on('data', (d) => (stderr += d));
     child.on('error', reject);
+    // A script that refuses before reading its input closes stdin first: writing to it then fails with EPIPE, which
+    // is what that test expects, not an error.
+    child.stdin.on('error', (e: NodeJS.ErrnoException) => { if (e.code !== 'EPIPE') reject(e); });
     child.on('close', (status) => resolve({ status, stdout, stderr }));
     child.stdin.end(opts.input ?? '');
   });
