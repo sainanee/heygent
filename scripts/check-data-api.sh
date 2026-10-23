@@ -27,6 +27,8 @@ fi
 
 printf 'anon key for %s: ' "$base" >&2
 IFS= read -rs key || true
+# A secret key (sb_secret_…, or a service_role JWT) bypasses every permission: with it the check proves nothing.
+case "$key" in sb_secret_*) key=''; echo "that is a secret key: use the project's publishable (anon) key" >&2; exit 2 ;; esac
 echo >&2
 [ -n "$key" ] || { echo "no key entered" >&2; exit 2; }
 
@@ -36,7 +38,13 @@ trap 'rm -rf "$tmp"' EXIT
 request() { # <output file> <curl args...>
   local out="$1"
   shift
-  printf 'apikey: %s\nAuthorization: Bearer %s\n' "$key" "$key" |
+  # A legacy anon key is a JWT and goes in both headers. A publishable key (sb_publishable_…) is not a JWT: it goes in
+  # apikey only, and the gateway then acts as the anon role.
+  if [[ "$key" == eyJ* ]]; then
+    printf 'apikey: %s\nAuthorization: Bearer %s\n' "$key" "$key"
+  else
+    printf 'apikey: %s\n' "$key"
+  fi |
     curl -sS -o "$out" -w '%{http_code}' --max-time 15 -H @- "$@" 2>/dev/null || true
 }
 
@@ -89,6 +97,10 @@ if [ "$exposed" -ne 0 ]; then
   exit 1
 fi
 if [ "$unverified" -ne 0 ]; then
+  # What the gateway said, so an unknown answer can be read (Supabase's error bodies carry no key).
+  for f in rest graphql; do
+    [ -s "$tmp/$f" ] && echo "  $f answered: $(head -c 300 "$tmp/$f" | tr -d '\n')" >&2
+  done
   echo "could not verify that $base refuses: check the project ref and anon key, and look again" >&2
   exit 2
 fi
