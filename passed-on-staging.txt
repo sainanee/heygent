@@ -1,2 +1,3 @@
 # Digests (sha256:<64 hex>) that passed conformance on staging, one per line.
 # Only conformance.yml appends here, through a pull request the owner merges. A production pin must be listed.
+sha256:17b813d8920265814096fcf68f39cf3a8f661179f8550e9c1ae3a9ebc1629907
