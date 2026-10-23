@@ -1,0 +1,117 @@
+name: soak
+
+# By hand only: the staging pair's soak (Task 8 Step 6, runbooks/soak.md). People on both staging servers trade Plan
+# moves for about a day while the servers are cut off from each other and their machines restarted at random; then the
+# verdict: no thread stuck, no new alert open, both servers showing every shared thread alike.
+#
+# GitHub ends a job after 6 hours, so the soak runs as four chained slices (soak-slice.yml) that hand the scenario on
+# as an artifact (people, threads, counts: no key or token). If a slice fails, the later ones do not trade moves, but
+# the fourth still runs the verdict on what the servers show, so every run ends with one; `verdict` then fails the run
+# if any slice did.
+#
+# Runs only on main; the staging apps' Fly tokens and the conformance keys come from the `fly` GitHub Environment, which
+# only main may use. Don't merge a staging pin or run conformance while it runs: each slice checks that both apps still
+# run the digest the soak began on.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One soak at a time.
+concurrency:
+  group: soak
+  cancel-in-progress: false
+
+jobs:
+  pin:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      digest: ${{ steps.pin.outputs.digest }}
+      revision: ${{ steps.pin.outputs.revision }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: the staging pair's pin, and the Parley commit it was built from
+        id: pin
+        run: |
+          set -euo pipefail
+          pin='^ghcr\.io/sainanee/parley-server@sha256:[0-9a-f]{64}$'
+          a="$(cat servers/heygent-staging/image 2>/dev/null || true)"
+          b="$(cat servers/peer-staging/image 2>/dev/null || true)"
+          [[ "$a" =~ $pin ]] || { echo "servers/heygent-staging/image is not a digest pin" >&2; exit 1; }
+          [ "$a" = "$b" ] || { echo "the staging pair runs two images: pin both to one digest" >&2; exit 1; }
+          docker pull --quiet "$a"
+          revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$a")"
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || { echo "the image has no org.opencontainers.image.revision label" >&2; exit 1; }
+          echo "digest=${a#*@}" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "image $a, built from sainanee/parley@$revision"
+
+  slice-1:
+    needs: pin
+    uses: ./.github/workflows/soak-slice.yml
+    # A called workflow sees no secrets unless they are passed (deploy.yml's conformance call says why).
+    secrets: inherit
+    with:
+      slice: 1
+      minutes: 345
+      final: false
+      digest: ${{ needs.pin.outputs.digest }}
+      revision: ${{ needs.pin.outputs.revision }}
+
+  slice-2:
+    needs: [pin, slice-1]
+    uses: ./.github/workflows/soak-slice.yml
+    secrets: inherit
+    with:
+      slice: 2
+      minutes: 345
+      final: false
+      digest: ${{ needs.pin.outputs.digest }}
+      revision: ${{ needs.pin.outputs.revision }}
+
+  slice-3:
+    needs: [pin, slice-2]
+    uses: ./.github/workflows/soak-slice.yml
+    secrets: inherit
+    with:
+      slice: 3
+      minutes: 345
+      final: false
+      digest: ${{ needs.pin.outputs.digest }}
+      revision: ${{ needs.pin.outputs.revision }}
+
+  # The last slice, then the verdict (up to 40 minutes for the servers to settle). After an earlier slice failed it trades
+  # no moves (minutes 0) and only judges what the servers show. Not after a cancel: a cancelled soak has no verdict.
+  slice-4:
+    needs: [pin, slice-1, slice-2, slice-3]
+    if: ${{ !cancelled() && needs.pin.result == 'success' }}
+    uses: ./.github/workflows/soak-slice.yml
+    secrets: inherit
+    with:
+      slice: 4
+      minutes: ${{ needs.slice-3.result == 'success' && 300 || 0 }}
+      final: true
+      digest: ${{ needs.pin.outputs.digest }}
+      revision: ${{ needs.pin.outputs.revision }}
+
+  verdict:
+    needs: [pin, slice-1, slice-2, slice-3, slice-4]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: every slice and the verdict passed
+        env:
+          RESULTS: pin=${{ needs.pin.result }} slice-1=${{ needs.slice-1.result }} slice-2=${{ needs.slice-2.result }} slice-3=${{ needs.slice-3.result }} slice-4=${{ needs.slice-4.result }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            [ "${r#*=}" = success ] || { echo "${r%%=*} did not pass (${r#*=}): the soak failed" >&2; exit 1; }
+          done
+          echo "soak passed"
