@@ -127,6 +127,9 @@ jobs:
     needs: deploy
     if: needs.deploy.outputs.staging == 'true'
     uses: ./.github/workflows/conformance.yml
+    # A called workflow sees no secrets unless they are passed, even with `environment: fly` on its job. The repository
+    # holds none of its own, so this passes only what the main-only `fly` environment gives the called jobs.
+    secrets: inherit
     permissions:
       contents: write
       pull-requests: write
